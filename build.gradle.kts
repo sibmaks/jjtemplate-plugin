@@ -1,20 +1,38 @@
 plugins {
     id("java")
+    id("jacoco")
+    id("org.sonarqube") version "7.0.1.6134"
+    id("org.jetbrains.intellij.platform") version "2.10.5"
 }
 
-group = "io.github.sibmaks"
-version = "1.0-SNAPSHOT"
-
 repositories {
+    mavenLocal()
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.10.0"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    implementation("io.github.sibmaks.jjtemplate:jjtemplate:unspecified")
+
+    intellijPlatform {
+        intellijIdeaCommunity("2025.1")
+        bundledPlugin("com.intellij.java")
+    }
 }
 
-tasks.test {
-    useJUnitPlatform()
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = "251"
+        }
+    }
+}
+
+tasks {
+    withType<JavaCompile>().configureEach {
+        options.release.set(21)
+    }
+
 }
