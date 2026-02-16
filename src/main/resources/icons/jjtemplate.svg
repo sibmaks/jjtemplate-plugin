@@ -1,0 +1,7 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <path d="M3 1h6l4 4v10H3V1z" fill="#F5F7FA"/>
+  <path d="M9 1v4h4" fill="#E4E8EF"/>
+  <path d="M3 1h6l4 4v10H3V1z" fill="none" stroke="#6E7681" stroke-width="1"/>
+  <path d="M9 1v4h4" fill="none" stroke="#6E7681" stroke-width="1"/>
+  <text x="8" y="11.4" text-anchor="middle" font-family="Arial, sans-serif" font-size="6.2" font-weight="700" fill="#2F6FEB">JJ</text>
+</svg>

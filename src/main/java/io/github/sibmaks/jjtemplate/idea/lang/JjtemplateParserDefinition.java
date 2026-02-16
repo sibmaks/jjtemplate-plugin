@@ -8,10 +8,9 @@ import com.intellij.lang.PsiParser;
 import com.intellij.lexer.Lexer;
 import com.intellij.lexer.LexerBase;
 import com.intellij.openapi.project.Project;
+import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.TokenType;
-import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.tree.IFileElementType;
 import com.intellij.psi.tree.TokenSet;
 import org.jetbrains.annotations.NotNull;
@@ -83,7 +82,7 @@ public final class JjtemplateParserDefinition implements ParserDefinition {
 
         @Override
         public @Nullable com.intellij.psi.tree.IElementType getTokenType() {
-            return done ? null : TokenType.WHITE_SPACE;
+            return done ? null : JjtemplateTokenTypes.TEXT;
         }
 
         @Override

@@ -6,7 +6,6 @@ plugins {
 }
 
 repositories {
-    mavenLocal()
     mavenCentral()
     intellijPlatform {
         defaultRepositories()
@@ -14,11 +13,11 @@ repositories {
 }
 
 dependencies {
-    implementation("io.github.sibmaks.jjtemplate:jjtemplate:unspecified")
 
     intellijPlatform {
         intellijIdeaCommunity("2025.1")
         bundledPlugin("com.intellij.java")
+        pluginModule(implementation("io.github.sibmaks.jjtemplate:jjtemplate:0.5.3"))
     }
 }
 
@@ -30,9 +29,16 @@ intellijPlatform {
     }
 }
 
+val versionFromProperty = "${project.property("version")}"
+val versionFromEnv: String? = System.getenv("VERSION")
+
+version = versionFromEnv ?: versionFromProperty
+group = "${project.property("group")}"
+
+val targetJavaVersion = (project.property("jdk_version") as String).toInt()
+
 tasks {
     withType<JavaCompile>().configureEach {
-        options.release.set(21)
+        options.release.set(targetJavaVersion)
     }
-
 }

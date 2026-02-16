@@ -23,6 +23,13 @@ public final class JjtemplateAnnotator implements Annotator {
             holder.newAnnotation(HighlightSeverity.ERROR, e.getMessage())
                     .range(TextRange.from(position, 1))
                     .create();
+        } catch (Throwable t) {
+            if (text.isEmpty()) {
+                return;
+            }
+            holder.newAnnotation(HighlightSeverity.WARNING, "JJTemplate lexer is unavailable: " + t.getClass().getSimpleName())
+                    .range(TextRange.from(0, 1))
+                    .create();
         }
     }
 }

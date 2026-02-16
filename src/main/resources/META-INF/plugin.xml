@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>io.github.sibmaks.jjtemplate.idea</id>
-    <name>JJTemplate Support</name>
+    <name>JJTemplate</name>
     <vendor email="sibmaks@gmail.com" url="https://github.com/sibmaks">sibmaks</vendor>
 
     <description><![CDATA[
