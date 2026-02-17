@@ -4,7 +4,7 @@
     <vendor email="sibmaks@gmail.com" url="https://github.com/sibmaks">sibmaks</vendor>
 
     <description><![CDATA[
-        Support for JJTemplate (*.jjtemplate) files: syntax highlighting, completion and built-in function docs.
+        Support for JJTemplate (*.jjt) files: syntax highlighting, completion and built-in function docs.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
