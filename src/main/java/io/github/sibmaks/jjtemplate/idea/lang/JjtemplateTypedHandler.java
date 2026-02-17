@@ -22,9 +22,9 @@ public final class JjtemplateTypedHandler extends TypedHandlerDelegate {
         }
 
         var close = switch (c) {
-            case '"' -> Character.valueOf('"');
-            case '{' -> Character.valueOf('}');
-            case '[' -> Character.valueOf(']');
+            case '"' -> '"';
+            case '{' -> '}';
+            case '[' -> ']';
             default -> null;
         };
         if (close == null) {
@@ -38,7 +38,7 @@ public final class JjtemplateTypedHandler extends TypedHandlerDelegate {
             return Result.CONTINUE;
         }
 
-        document.insertString(offset, String.valueOf(c) + close.charValue());
+        document.insertString(offset, String.valueOf(c) + close);
         editor.getCaretModel().moveToOffset(offset + 1);
         return Result.STOP;
     }

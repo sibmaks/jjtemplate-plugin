@@ -25,7 +25,9 @@
                                     implementationClass="io.github.sibmaks.jjtemplate.idea.docs.JjtemplateDocumentationProvider"/>
         <annotator language="JJTemplate"
                    implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateAnnotator"/>
-        <postFormatProcessor implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplatePostFormatProcessor"/>
-        <typedHandler implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateTypedHandler"/>
+        <lang.foldingBuilder language="JJTemplate"
+                             implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateFoldingBuilder"/>
+        <postFormatProcessor implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplatePostFormatProcessor"/>
+        <typedHandler implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateTypedHandler"/>
     </extensions>
 </idea-plugin>
