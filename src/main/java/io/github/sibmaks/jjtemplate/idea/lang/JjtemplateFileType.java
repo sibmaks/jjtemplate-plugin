@@ -27,7 +27,7 @@ public final class JjtemplateFileType extends LanguageFileType {
 
     @Override
     public @NotNull String getDefaultExtension() {
-        return "jjtemplate";
+        return "jjt";
     }
 
     @Override

@@ -16,6 +16,7 @@ public final class JjtemplateAnnotator implements Annotator {
             return;
         }
         var text = element.getText();
+        highlightJsonLike(text, holder);
         try {
             new TemplateLexer(text).tokens();
         } catch (TemplateLexerException e) {
@@ -31,5 +32,105 @@ public final class JjtemplateAnnotator implements Annotator {
                     .range(TextRange.from(0, 1))
                     .create();
         }
+    }
+
+    private static void highlightJsonLike(String text, AnnotationHolder holder) {
+        var nesting = 0;
+        var inString = false;
+        var escaped = false;
+        var stringStart = -1;
+        var inTemplate = false;
+
+        for (int i = 0; i < text.length(); i++) {
+            var ch = text.charAt(i);
+
+            if (inTemplate) {
+                if (ch == '}' && i + 1 < text.length() && text.charAt(i + 1) == '}') {
+                    inTemplate = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '"') {
+                    inString = false;
+                    if (isObjectKey(text, i + 1)) {
+                        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                                .range(TextRange.create(stringStart, i + 1))
+                                .textAttributes(JjtemplateSyntaxHighlighter.OBJECT_KEY)
+                                .create();
+                    }
+                }
+                continue;
+            }
+
+            if (isTemplateStart(text, i)) {
+                inTemplate = true;
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                stringStart = i;
+                continue;
+            }
+            if (ch == '{') {
+                if (nesting == 0) {
+                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                            .range(TextRange.from(i, 1))
+                            .textAttributes(JjtemplateSyntaxHighlighter.ROOT_OBJECT)
+                            .create();
+                }
+                nesting++;
+                continue;
+            }
+            if (ch == '[') {
+                if (nesting == 0) {
+                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                            .range(TextRange.from(i, 1))
+                            .textAttributes(JjtemplateSyntaxHighlighter.ROOT_ARRAY)
+                            .create();
+                }
+                nesting++;
+                continue;
+            }
+            if (ch == '}' || ch == ']') {
+                if (nesting > 0) {
+                    nesting--;
+                }
+                if (nesting == 0) {
+                    var attributes = ch == '}' ? JjtemplateSyntaxHighlighter.ROOT_OBJECT : JjtemplateSyntaxHighlighter.ROOT_ARRAY;
+                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                            .range(TextRange.from(i, 1))
+                            .textAttributes(attributes)
+                            .create();
+                }
+            }
+        }
+    }
+
+    private static boolean isObjectKey(String text, int index) {
+        var pointer = index;
+        while (pointer < text.length() && Character.isWhitespace(text.charAt(pointer))) {
+            pointer++;
+        }
+        return pointer < text.length() && text.charAt(pointer) == ':';
+    }
+
+    private static boolean isTemplateStart(String text, int index) {
+        if (text.charAt(index) != '{' || index + 1 >= text.length()) {
+            return false;
+        }
+        var next = text.charAt(index + 1);
+        return next == '{' || next == '?' || next == '.';
     }
 }

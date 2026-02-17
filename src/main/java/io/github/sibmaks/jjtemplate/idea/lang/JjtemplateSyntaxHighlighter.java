@@ -11,6 +11,13 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Map;
 
 public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
+    public static final TextAttributesKey OBJECT_KEY =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.OBJECT_KEY", DefaultLanguageHighlighterColors.INSTANCE_FIELD);
+    public static final TextAttributesKey ROOT_OBJECT =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.ROOT_OBJECT", DefaultLanguageHighlighterColors.BRACES);
+    public static final TextAttributesKey ROOT_ARRAY =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.ROOT_ARRAY", DefaultLanguageHighlighterColors.BRACKETS);
+
     private static final TextAttributesKey[] BAD_CHAR = pack(HighlighterColors.BAD_CHARACTER);
     private static final TextAttributesKey[] EMPTY = TextAttributesKey.EMPTY_ARRAY;
 
