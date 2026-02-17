@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import io.github.sibmaks.jjtemplate.lexer.TemplateLexer;
+import io.github.sibmaks.jjtemplate.lexer.api.Keyword;
 import io.github.sibmaks.jjtemplate.lexer.api.TemplateLexerException;
 import io.github.sibmaks.jjtemplate.lexer.api.Token;
 import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
@@ -289,11 +290,42 @@ public final class JjtemplateAnnotator implements Annotator {
             if (token.type != TokenType.IDENT) {
                 continue;
             }
-            var key = isFunctionCall(tokens, i)
+            var key = isDefinitionName(tokens, i) || isRangeBindingName(tokens, i)
+                    ? JjtemplateSyntaxHighlighter.OBJECT_KEY
+                    : isFunctionCall(tokens, i)
                     ? JjtemplateSyntaxHighlighter.TEMPLATE_FUNCTION
                     : JjtemplateSyntaxHighlighter.TEMPLATE_VARIABLE;
             annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
         }
+    }
+
+    private static boolean isDefinitionName(List<Token> tokens, int identIndex) {
+        var next = findNextNonTextToken(tokens, identIndex + 1);
+        if (next == null || next.type() != TokenType.KEYWORD) {
+            return false;
+        }
+        return Keyword.SWITCH.eq(next.token().lexeme) || Keyword.RANGE.eq(next.token().lexeme);
+    }
+
+    private static boolean isRangeBindingName(List<Token> tokens, int identIndex) {
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (previous == null) {
+            return false;
+        }
+        if (previous.type() == TokenType.KEYWORD && Keyword.RANGE.eq(previous.token().lexeme)) {
+            return true;
+        }
+        if (previous.type() != TokenType.COMMA) {
+            return false;
+        }
+        var beforeComma = findPreviousNonTextToken(tokens, previous.index() - 1);
+        if (beforeComma == null || beforeComma.type() != TokenType.IDENT) {
+            return false;
+        }
+        var beforeFirstBinding = findPreviousNonTextToken(tokens, beforeComma.index() - 1);
+        return beforeFirstBinding != null
+                && beforeFirstBinding.type() == TokenType.KEYWORD
+                && Keyword.RANGE.eq(beforeFirstBinding.token().lexeme);
     }
 
     private static boolean isFunctionCall(List<Token> tokens, int identIndex) {
