@@ -12,7 +12,7 @@ public final class JjtemplateDocumentationProvider extends AbstractDocumentation
         if (element == null || !element.getLanguage().isKindOf(JjtemplateLanguage.INSTANCE)) {
             return null;
         }
-        var key = element.getText();
+        var key = resolveLookupKey(element, originalElement);
         if (key == null || key.isBlank()) {
             return null;
         }
@@ -25,5 +25,42 @@ public final class JjtemplateDocumentationProvider extends AbstractDocumentation
         return "<h2>" + function.presentableName() + "</h2>"
                 + "<p>" + function.description() + "</p>"
                 + "<p><b>Kind:</b> JJTemplate built-in function</p>";
+    }
+
+    private static String resolveLookupKey(PsiElement element, @Nullable PsiElement originalElement) {
+        var sourceElement = originalElement != null ? originalElement : element;
+        var file = sourceElement.getContainingFile();
+        if (file == null) {
+            return element.getText();
+        }
+        var text = file.getText();
+        if (text == null || text.isEmpty()) {
+            return element.getText();
+        }
+        var offset = Math.min(Math.max(sourceElement.getTextOffset(), 0), text.length() - 1);
+        if (!isFunctionTokenChar(text.charAt(offset)) && offset > 0 && isFunctionTokenChar(text.charAt(offset - 1))) {
+            offset--;
+        }
+        if (!isFunctionTokenChar(text.charAt(offset))) {
+            return element.getText();
+        }
+
+        var start = offset;
+        while (start > 0 && isFunctionTokenChar(text.charAt(start - 1))) {
+            start--;
+        }
+        var end = offset + 1;
+        while (end < text.length() && isFunctionTokenChar(text.charAt(end))) {
+            end++;
+        }
+        var token = text.substring(start, end);
+        if (token.contains("::")) {
+            return token;
+        }
+        return element.getText();
+    }
+
+    private static boolean isFunctionTokenChar(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_' || ch == ':';
     }
 }

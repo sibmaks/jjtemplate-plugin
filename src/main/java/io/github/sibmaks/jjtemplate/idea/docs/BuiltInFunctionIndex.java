@@ -18,13 +18,21 @@ public final class BuiltInFunctionIndex {
     }
 
     public static BuiltInFunctionInfo find(String key) {
-        return BY_LOOKUP.get(key);
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+        var direct = BY_LOOKUP.get(key);
+        if (direct != null) {
+            return direct;
+        }
+        return BY_LOOKUP.get(key.replace("::", ":"));
     }
 
     private static Map<String, BuiltInFunctionInfo> buildLookup(List<BuiltInFunctionInfo> functions) {
         var result = new HashMap<String, BuiltInFunctionInfo>();
         for (var function : functions) {
             result.putIfAbsent(function.lookupKey(), function);
+            result.putIfAbsent(function.lookupKey().replace("::", ":"), function);
             result.putIfAbsent(function.name(), function);
         }
         return Collections.unmodifiableMap(result);
@@ -44,7 +52,7 @@ public final class BuiltInFunctionIndex {
                 var function = constructor.newInstance();
                 var namespace = Optional.ofNullable(function.getNamespace()).orElse("");
                 var name = function.getName();
-                var lookupKey = namespace.isEmpty() ? name : namespace + ":" + name;
+                var lookupKey = namespace.isEmpty() ? name : namespace + "::" + name;
                 result.add(new BuiltInFunctionInfo(lookupKey, namespace, name, "Built-in JJTemplate function."));
             } catch (Throwable ignored) {
                 // ignore non-instantiable classes

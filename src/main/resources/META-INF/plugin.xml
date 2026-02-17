@@ -19,6 +19,8 @@
                                        implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateSyntaxHighlighterFactory"/>
         <lang.parserDefinition language="JJTemplate"
                                implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateParserDefinition"/>
+        <lang.braceMatcher language="JJTemplate"
+                           implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateBraceMatcher"/>
         <completion.contributor language="JJTemplate"
                                 implementationClass="io.github.sibmaks.jjtemplate.idea.completion.JjtemplateCompletionContributor"/>
         <lang.documentationProvider language="JJTemplate"

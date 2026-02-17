@@ -48,6 +48,10 @@ public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
             Map.entry(JjtemplateTokenTypes.QUESTION, pack(DefaultLanguageHighlighterColors.OPERATION_SIGN)),
             Map.entry(JjtemplateTokenTypes.LPAREN, pack(DefaultLanguageHighlighterColors.PARENTHESES)),
             Map.entry(JjtemplateTokenTypes.RPAREN, pack(DefaultLanguageHighlighterColors.PARENTHESES)),
+            Map.entry(JjtemplateTokenTypes.LBRACE, pack(DefaultLanguageHighlighterColors.BRACES)),
+            Map.entry(JjtemplateTokenTypes.RBRACE, pack(DefaultLanguageHighlighterColors.BRACES)),
+            Map.entry(JjtemplateTokenTypes.LBRACKET, pack(DefaultLanguageHighlighterColors.BRACKETS)),
+            Map.entry(JjtemplateTokenTypes.RBRACKET, pack(DefaultLanguageHighlighterColors.BRACKETS)),
             Map.entry(JjtemplateTokenTypes.IDENT, pack(TEMPLATE_VARIABLE))
     );
 

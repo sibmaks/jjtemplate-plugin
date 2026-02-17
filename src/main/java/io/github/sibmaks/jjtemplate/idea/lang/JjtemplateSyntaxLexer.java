@@ -16,7 +16,7 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
     private CharSequence buffer = "";
     private int startOffset;
     private int endOffset;
-    private List<Token> tokens = Collections.emptyList();
+    private List<Lexeme> tokens = Collections.emptyList();
     private int index;
 
     @Override
@@ -27,7 +27,7 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
         this.index = 0;
         var source = buffer.subSequence(startOffset, endOffset).toString();
         try {
-            this.tokens = normalizeTokens(new TemplateLexer(source).tokens(), source);
+            this.tokens = toLexemes(normalizeTokens(new TemplateLexer(source).tokens(), source), source);
         } catch (Throwable e) {
             this.tokens = fallbackTokens(source);
         }
@@ -43,7 +43,7 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
         if (index >= tokens.size()) {
             return null;
         }
-        return mapType(tokens.get(index).type);
+        return tokens.get(index).type;
     }
 
     @Override
@@ -51,7 +51,7 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
         if (index >= tokens.size()) {
             return endOffset;
         }
-        return startOffset + tokens.get(index).start;
+        return startOffset + tokens.get(index).start();
     }
 
     @Override
@@ -60,8 +60,8 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
             return endOffset;
         }
         var token = tokens.get(index);
-        var tokenStart = startOffset + token.start;
-        var tokenEnd = startOffset + token.end;
+        var tokenStart = startOffset + token.start();
+        var tokenEnd = startOffset + token.end();
         if (tokenEnd <= tokenStart) {
             return Math.min(endOffset, tokenStart + 1);
         }
@@ -108,6 +108,24 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
         };
     }
 
+    private static List<Lexeme> toLexemes(List<Token> sourceTokens, String source) {
+        if (source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        var result = new ArrayList<Lexeme>(sourceTokens.size());
+        for (var token : sourceTokens) {
+            if (token.type == TokenType.TEXT) {
+                appendPlainTextTokens(source, token.start, token.end, result);
+                continue;
+            }
+            result.add(new Lexeme(mapType(token.type), token.start, token.end));
+        }
+        if (result.isEmpty()) {
+            return fallbackTokens(source);
+        }
+        return result;
+    }
+
     private static List<Token> normalizeTokens(List<Token> sourceTokens, String source) {
         if (source.isEmpty()) {
             return Collections.emptyList();
@@ -138,15 +156,54 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
             normalized.add(new Token(TokenType.TEXT, source.substring(currentStart), currentStart, length));
         }
         if (normalized.isEmpty()) {
-            return fallbackTokens(source);
+            return List.of(new Token(TokenType.TEXT, source, 0, source.length()));
         }
         return normalized;
     }
 
-    private static List<Token> fallbackTokens(String source) {
+    private static List<Lexeme> fallbackTokens(String source) {
         if (source.isEmpty()) {
             return Collections.emptyList();
         }
-        return List.of(new Token(TokenType.TEXT, source, 0, source.length()));
+        var result = new ArrayList<Lexeme>();
+        appendPlainTextTokens(source, 0, source.length(), result);
+        if (result.isEmpty()) {
+            result.add(new Lexeme(JjtemplateTokenTypes.TEXT, 0, source.length()));
+        }
+        return result;
+    }
+
+    private static void appendPlainTextTokens(String source, int from, int to, List<Lexeme> out) {
+        var cursor = from;
+        while (cursor < to) {
+            var ch = source.charAt(cursor);
+            var punctType = mapPlainDelimiter(ch);
+            if (punctType != null) {
+                out.add(new Lexeme(punctType, cursor, cursor + 1));
+                cursor++;
+                continue;
+            }
+
+            var start = cursor;
+            while (cursor < to && mapPlainDelimiter(source.charAt(cursor)) == null) {
+                cursor++;
+            }
+            out.add(new Lexeme(JjtemplateTokenTypes.TEXT, start, cursor));
+        }
+    }
+
+    private static IElementType mapPlainDelimiter(char ch) {
+        return switch (ch) {
+            case '{' -> JjtemplateTokenTypes.LBRACE;
+            case '}' -> JjtemplateTokenTypes.RBRACE;
+            case '[' -> JjtemplateTokenTypes.LBRACKET;
+            case ']' -> JjtemplateTokenTypes.RBRACKET;
+            case '(' -> JjtemplateTokenTypes.LPAREN;
+            case ')' -> JjtemplateTokenTypes.RPAREN;
+            default -> null;
+        };
+    }
+
+    private record Lexeme(IElementType type, int start, int end) {
     }
 }

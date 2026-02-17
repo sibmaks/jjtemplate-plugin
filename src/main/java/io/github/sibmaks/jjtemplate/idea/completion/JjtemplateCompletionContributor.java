@@ -65,14 +65,14 @@ public final class JjtemplateCompletionContributor extends CompletionContributor
             start--;
         }
         var token = chars.subSequence(start + 1, offset).toString();
-        var colonIndex = token.indexOf(':');
-        if (colonIndex <= 0 || colonIndex == token.length() - 1 && token.charAt(token.length() - 1) == ':') {
-            return colonIndex > 0 ? new NamespaceContext(token.substring(0, colonIndex), "") : null;
-        }
-        if (colonIndex <= 0) {
+        var separator = token.indexOf("::");
+        if (separator <= 0) {
             return null;
         }
-        return new NamespaceContext(token.substring(0, colonIndex), token.substring(colonIndex + 1));
+        if (separator == token.length() - 2) {
+            return new NamespaceContext(token.substring(0, separator), "");
+        }
+        return new NamespaceContext(token.substring(0, separator), token.substring(separator + 2));
     }
 
     private static boolean isFunctionTokenChar(char ch) {

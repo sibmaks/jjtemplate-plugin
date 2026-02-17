@@ -15,6 +15,10 @@ public final class JjtemplateTokenTypes {
     public static final IElementType QUESTION = new IElementType("QUESTION", JjtemplateLanguage.INSTANCE);
     public static final IElementType LPAREN = new IElementType("LPAREN", JjtemplateLanguage.INSTANCE);
     public static final IElementType RPAREN = new IElementType("RPAREN", JjtemplateLanguage.INSTANCE);
+    public static final IElementType LBRACE = new IElementType("LBRACE", JjtemplateLanguage.INSTANCE);
+    public static final IElementType RBRACE = new IElementType("RBRACE", JjtemplateLanguage.INSTANCE);
+    public static final IElementType LBRACKET = new IElementType("LBRACKET", JjtemplateLanguage.INSTANCE);
+    public static final IElementType RBRACKET = new IElementType("RBRACKET", JjtemplateLanguage.INSTANCE);
     public static final IElementType STRING = new IElementType("STRING", JjtemplateLanguage.INSTANCE);
     public static final IElementType NUMBER = new IElementType("NUMBER", JjtemplateLanguage.INSTANCE);
     public static final IElementType BOOLEAN = new IElementType("BOOLEAN", JjtemplateLanguage.INSTANCE);
