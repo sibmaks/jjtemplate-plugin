@@ -1,41 +1,23 @@
 package io.github.sibmaks.jjtemplate.idea.lang;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.DefaultLanguageHighlighterColors;
+import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import io.github.sibmaks.jjtemplate.lexer.TemplateLexer;
-import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
 import io.github.sibmaks.jjtemplate.lexer.api.TemplateLexerException;
+import io.github.sibmaks.jjtemplate.lexer.api.Token;
+import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
 import org.jetbrains.annotations.NotNull;
 
-public final class JjtemplateAnnotator implements Annotator {
-    @Override
-    public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
-        if (!(element instanceof JjtemplateFile)) {
-            return;
-        }
-        var text = element.getText();
-        highlightJsonLike(text, holder);
-        try {
-            new TemplateLexer(text).tokens();
-        } catch (TemplateLexerException e) {
-            var position = Math.min(Math.max(e.getPosition(), 0), Math.max(text.length() - 1, 0));
-            holder.newAnnotation(HighlightSeverity.ERROR, e.getMessage())
-                    .range(TextRange.from(position, 1))
-                    .create();
-        } catch (Throwable t) {
-            if (text.isEmpty()) {
-                return;
-            }
-            holder.newAnnotation(HighlightSeverity.WARNING, "JJTemplate lexer is unavailable: " + t.getClass().getSimpleName())
-                    .range(TextRange.from(0, 1))
-                    .create();
-        }
-    }
+import java.util.List;
 
+public final class JjtemplateAnnotator implements Annotator {
     private static void highlightJsonLike(String text, AnnotationHolder holder) {
         var nesting = 0;
         var inString = false;
@@ -164,7 +146,7 @@ public final class JjtemplateAnnotator implements Annotator {
                                                    int start,
                                                    int endExclusive,
                                                    AnnotationHolder holder,
-                                                   com.intellij.openapi.editor.colors.TextAttributesKey plainTextStyle) {
+                                                   TextAttributesKey plainTextStyle) {
         var contentStart = start + 1;
         var contentEnd = Math.max(contentStart, endExclusive - 1);
         var cursor = start;
@@ -211,7 +193,7 @@ public final class JjtemplateAnnotator implements Annotator {
         }
     }
 
-    private static com.intellij.openapi.editor.colors.TextAttributesKey mapLookupToken(TokenType tokenType) {
+    private static TextAttributesKey mapLookupToken(TokenType tokenType) {
         return switch (tokenType) {
             case OPEN_EXPR, OPEN_COND, OPEN_SPREAD, CLOSE -> DefaultLanguageHighlighterColors.BRACES;
             case KEYWORD, BOOLEAN, NULL -> DefaultLanguageHighlighterColors.KEYWORD;
@@ -221,15 +203,135 @@ public final class JjtemplateAnnotator implements Annotator {
             case DOT -> DefaultLanguageHighlighterColors.DOT;
             case COMMA -> DefaultLanguageHighlighterColors.COMMA;
             case LPAREN, RPAREN -> DefaultLanguageHighlighterColors.PARENTHESES;
-            case IDENT -> DefaultLanguageHighlighterColors.IDENTIFIER;
+            case IDENT -> null;
             case TEXT -> null;
         };
+    }
+
+    private static void validateJson(String text, AnnotationHolder holder) {
+        if (text.isBlank()) {
+            return;
+        }
+        try (var parser = new JsonFactory().createParser(text)) {
+            while (parser.nextToken() != null) {
+                // Keep parsing to surface the first syntax error, if any.
+            }
+        } catch (JsonParseException e) {
+            var offset = toOffset(text, e);
+            holder.newAnnotation(HighlightSeverity.ERROR, e.getOriginalMessage())
+                    .range(TextRange.from(offset, 1))
+                    .create();
+        } catch (Throwable ignored) {
+            // Do not block editing if JSON parser is unavailable in IDE runtime.
+        }
+    }
+
+    private static void validateSubstitutions(List<Token> tokens, AnnotationHolder holder) {
+        validateSubstitutions(tokens, 0, holder);
+    }
+
+    private static void validateSubstitutions(List<Token> tokens, int baseOffset, AnnotationHolder holder) {
+        for (int i = 0; i < tokens.size(); i++) {
+            var token = tokens.get(i);
+            if (token.type != TokenType.PIPE) {
+                continue;
+            }
+            var next = findNextNonTextToken(tokens, i + 1);
+            if (next == null || !isValidTokenAfterPipe(next.type())) {
+                holder.newAnnotation(HighlightSeverity.ERROR, "Missing expression after pipe operator")
+                        .range(TextRange.create(baseOffset + token.start, baseOffset + Math.max(token.end, token.start + 1)))
+                        .create();
+            }
+        }
+    }
+
+    private static boolean isValidTokenAfterPipe(TokenType type) {
+        return switch (type) {
+            case IDENT, STRING, NUMBER, BOOLEAN, NULL, LPAREN, DOT, KEYWORD -> true;
+            default -> false;
+        };
+    }
+
+    private static void highlightTemplateIdentifiers(List<Token> tokens, AnnotationHolder holder) {
+        highlightTemplateIdentifiers(tokens, 0, holder);
+    }
+
+    private static void highlightTemplateIdentifiers(List<Token> tokens, int baseOffset, AnnotationHolder holder) {
+        for (int i = 0; i < tokens.size(); i++) {
+            var token = tokens.get(i);
+            if (token.type != TokenType.IDENT) {
+                continue;
+            }
+            var key = isFunctionCall(tokens, i)
+                    ? JjtemplateSyntaxHighlighter.TEMPLATE_FUNCTION
+                    : JjtemplateSyntaxHighlighter.TEMPLATE_VARIABLE;
+            annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
+        }
+    }
+
+    private static boolean isFunctionCall(List<Token> tokens, int identIndex) {
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (previous != null && previous.type() == TokenType.PIPE) {
+            return true;
+        }
+        var next = findNextNonTextToken(tokens, identIndex + 1);
+        if (next != null && next.type() == TokenType.LPAREN) {
+            return true;
+        }
+        if (next != null && next.type() == TokenType.COLON) {
+            var nextNext = findNextNonTextToken(tokens, next.index() + 1);
+            return nextNext != null && nextNext.type() == TokenType.COLON;
+        }
+        if (previous != null && previous.type() == TokenType.COLON) {
+            var previousPrevious = findPreviousNonTextToken(tokens, previous.index() - 1);
+            return previousPrevious != null && previousPrevious.type() == TokenType.COLON;
+        }
+        return false;
+    }
+
+    private static IndexedToken findPreviousNonTextToken(List<Token> tokens, int from) {
+        for (int i = from; i >= 0; i--) {
+            if (tokens.get(i).type != TokenType.TEXT) {
+                return new IndexedToken(i, tokens.get(i));
+            }
+        }
+        return null;
+    }
+
+    private static IndexedToken findNextNonTextToken(List<Token> tokens, int from) {
+        for (int i = from; i < tokens.size(); i++) {
+            if (tokens.get(i).type != TokenType.TEXT) {
+                return new IndexedToken(i, tokens.get(i));
+            }
+        }
+        return null;
+    }
+
+    private static int toOffset(String text, JsonParseException error) {
+        var location = error.getLocation();
+        if (location != null && location.getCharOffset() >= 0) {
+            var offset = (int) location.getCharOffset();
+            return Math.min(Math.max(offset, 0), Math.max(text.length() - 1, 0));
+        }
+        if (location == null || location.getLineNr() <= 0 || location.getColumnNr() <= 0) {
+            return 0;
+        }
+        var line = 1;
+        var index = 0;
+        while (index < text.length() && line < location.getLineNr()) {
+            if (text.charAt(index) == '\n') {
+                line++;
+            }
+            index++;
+        }
+        var offset = index + location.getColumnNr() - 1;
+        return Math.min(Math.max(offset, 0), Math.max(text.length() - 1, 0));
     }
 
     private static void annotateRange(AnnotationHolder holder,
                                       int start,
                                       int endExclusive,
-                                      com.intellij.openapi.editor.colors.TextAttributesKey key) {
+                                      TextAttributesKey key) {
         if (start >= endExclusive) {
             return;
         }
@@ -283,5 +385,38 @@ public final class JjtemplateAnnotator implements Annotator {
             }
         }
         return index;
+    }
+
+    @Override
+    public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
+        if (!(element instanceof JjtemplateFile)) {
+            return;
+        }
+        var text = element.getText();
+        highlightJsonLike(text, holder);
+        validateJson(text, holder);
+        try {
+            var tokens = new TemplateLexer(text).tokens();
+            validateSubstitutions(tokens, holder);
+            highlightTemplateIdentifiers(tokens, holder);
+        } catch (TemplateLexerException e) {
+            var position = Math.min(Math.max(e.getPosition(), 0), Math.max(text.length() - 1, 0));
+            holder.newAnnotation(HighlightSeverity.ERROR, e.getMessage())
+                    .range(TextRange.from(position, 1))
+                    .create();
+        } catch (Throwable t) {
+            if (text.isEmpty()) {
+                return;
+            }
+            holder.newAnnotation(HighlightSeverity.WARNING, "JJTemplate lexer is unavailable: " + t.getClass().getSimpleName())
+                    .range(TextRange.from(0, 1))
+                    .create();
+        }
+    }
+
+    private record IndexedToken(int index, Token token) {
+        private TokenType type() {
+            return token.type;
+        }
     }
 }

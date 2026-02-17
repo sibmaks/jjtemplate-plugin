@@ -23,6 +23,10 @@ public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
             TextAttributesKey.createTextAttributesKey("JJTEMPLATE.ROOT_OBJECT", DefaultLanguageHighlighterColors.BRACES);
     public static final TextAttributesKey ROOT_ARRAY =
             TextAttributesKey.createTextAttributesKey("JJTEMPLATE.ROOT_ARRAY", DefaultLanguageHighlighterColors.BRACKETS);
+    public static final TextAttributesKey TEMPLATE_FUNCTION =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.TEMPLATE_FUNCTION", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
+    public static final TextAttributesKey TEMPLATE_VARIABLE =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.TEMPLATE_VARIABLE", DefaultLanguageHighlighterColors.LOCAL_VARIABLE);
 
     private static final TextAttributesKey[] BAD_CHAR = pack(HighlighterColors.BAD_CHARACTER);
     private static final TextAttributesKey[] EMPTY = TextAttributesKey.EMPTY_ARRAY;
@@ -44,7 +48,7 @@ public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
             Map.entry(JjtemplateTokenTypes.QUESTION, pack(DefaultLanguageHighlighterColors.OPERATION_SIGN)),
             Map.entry(JjtemplateTokenTypes.LPAREN, pack(DefaultLanguageHighlighterColors.PARENTHESES)),
             Map.entry(JjtemplateTokenTypes.RPAREN, pack(DefaultLanguageHighlighterColors.PARENTHESES)),
-            Map.entry(JjtemplateTokenTypes.IDENT, pack(DefaultLanguageHighlighterColors.IDENTIFIER))
+            Map.entry(JjtemplateTokenTypes.IDENT, pack(TEMPLATE_VARIABLE))
     );
 
     @Override
