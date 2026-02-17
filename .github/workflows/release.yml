@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build And Release Jar
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "oracle"
+          cache: "gradle"
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build plugin jar from tag version
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          echo "Building version: ${VERSION}"
+          VERSION="${VERSION}" ./gradlew clean buildPlugin --no-daemon
+
+      - name: Resolve release jar path
+        id: jar
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          JAR_PATH="build/distributions/mock4idea-${VERSION}.jar"
+
+          if [ ! -f "${JAR_PATH}" ]; then
+            echo "Release jar not found: ${JAR_PATH}"
+            echo "Available artifacts:"
+            ls -la build/distributions || true
+            exit 1
+          fi
+
+          echo "path=${JAR_PATH}" >> "$GITHUB_OUTPUT"
+          echo "release jar: ${JAR_PATH}"
+
+      - name: Create GitHub release and upload jar
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: ${{ steps.jar.outputs.path }}
