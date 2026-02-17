@@ -176,6 +176,26 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
     private static void appendPlainTextTokens(String source, int from, int to, List<Lexeme> out) {
         var cursor = from;
         while (cursor < to) {
+            if (cursor + 1 < to) {
+                var first = source.charAt(cursor);
+                var second = source.charAt(cursor + 1);
+                var templateType = switch (first) {
+                    case '{' -> switch (second) {
+                        case '{' -> JjtemplateTokenTypes.OPEN_EXPR;
+                        case '?' -> JjtemplateTokenTypes.OPEN_COND;
+                        case '.' -> JjtemplateTokenTypes.OPEN_SPREAD;
+                        default -> null;
+                    };
+                    case '}' -> second == '}' ? JjtemplateTokenTypes.CLOSE : null;
+                    default -> null;
+                };
+                if (templateType != null) {
+                    out.add(new Lexeme(templateType, cursor, cursor + 2));
+                    cursor += 2;
+                    continue;
+                }
+            }
+
             var ch = source.charAt(cursor);
             var punctType = mapPlainDelimiter(ch);
             if (punctType != null) {

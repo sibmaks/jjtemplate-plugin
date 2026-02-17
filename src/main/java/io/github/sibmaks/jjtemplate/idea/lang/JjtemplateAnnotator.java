@@ -218,12 +218,39 @@ public final class JjtemplateAnnotator implements Annotator {
             }
         } catch (JsonParseException e) {
             var offset = toOffset(text, e);
+            if (isInsideTemplate(text, offset)) {
+                return;
+            }
             holder.newAnnotation(HighlightSeverity.ERROR, e.getOriginalMessage())
                     .range(TextRange.from(offset, 1))
                     .create();
         } catch (Throwable ignored) {
             // Do not block editing if JSON parser is unavailable in IDE runtime.
         }
+    }
+
+    private static boolean isInsideTemplate(String text, int offset) {
+        if (text.isEmpty()) {
+            return false;
+        }
+        var target = Math.min(Math.max(offset, 0), text.length() - 1);
+        var inTemplate = false;
+        for (int i = 0; i < text.length(); i++) {
+            if (i == target) {
+                return inTemplate;
+            }
+            if (inTemplate) {
+                if (text.charAt(i) == '}' && i + 1 < text.length() && text.charAt(i + 1) == '}') {
+                    inTemplate = false;
+                    i++;
+                }
+                continue;
+            }
+            if (isTemplateStart(text, i)) {
+                inTemplate = true;
+            }
+        }
+        return false;
     }
 
     private static void validateSubstitutions(List<Token> tokens, AnnotationHolder holder) {

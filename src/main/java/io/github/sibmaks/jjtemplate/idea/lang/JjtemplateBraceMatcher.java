@@ -9,6 +9,9 @@ import org.jetbrains.annotations.Nullable;
 
 public final class JjtemplateBraceMatcher implements PairedBraceMatcher {
     private static final BracePair[] PAIRS = {
+            new BracePair(JjtemplateTokenTypes.OPEN_EXPR, JjtemplateTokenTypes.CLOSE, false),
+            new BracePair(JjtemplateTokenTypes.OPEN_COND, JjtemplateTokenTypes.CLOSE, false),
+            new BracePair(JjtemplateTokenTypes.OPEN_SPREAD, JjtemplateTokenTypes.CLOSE, false),
             new BracePair(JjtemplateTokenTypes.LBRACE, JjtemplateTokenTypes.RBRACE, true),
             new BracePair(JjtemplateTokenTypes.LBRACKET, JjtemplateTokenTypes.RBRACKET, true),
             new BracePair(JjtemplateTokenTypes.LPAREN, JjtemplateTokenTypes.RPAREN, false)
