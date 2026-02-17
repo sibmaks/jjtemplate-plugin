@@ -11,6 +11,12 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Map;
 
 public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
+    public static final TextAttributesKey JSON_STRING =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.JSON_STRING", DefaultLanguageHighlighterColors.STRING);
+    public static final TextAttributesKey JSON_NUMBER =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.JSON_NUMBER", DefaultLanguageHighlighterColors.NUMBER);
+    public static final TextAttributesKey JSON_BOOLEAN =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.JSON_BOOLEAN", DefaultLanguageHighlighterColors.KEYWORD);
     public static final TextAttributesKey OBJECT_KEY =
             TextAttributesKey.createTextAttributesKey("JJTEMPLATE.OBJECT_KEY", DefaultLanguageHighlighterColors.INSTANCE_FIELD);
     public static final TextAttributesKey ROOT_OBJECT =
@@ -27,10 +33,10 @@ public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
             Map.entry(JjtemplateTokenTypes.OPEN_SPREAD, pack(DefaultLanguageHighlighterColors.BRACES)),
             Map.entry(JjtemplateTokenTypes.CLOSE, pack(DefaultLanguageHighlighterColors.BRACES)),
             Map.entry(JjtemplateTokenTypes.KEYWORD, pack(DefaultLanguageHighlighterColors.KEYWORD)),
-            Map.entry(JjtemplateTokenTypes.STRING, pack(DefaultLanguageHighlighterColors.STRING)),
-            Map.entry(JjtemplateTokenTypes.NUMBER, pack(DefaultLanguageHighlighterColors.NUMBER)),
-            Map.entry(JjtemplateTokenTypes.BOOLEAN, pack(DefaultLanguageHighlighterColors.KEYWORD)),
-            Map.entry(JjtemplateTokenTypes.NULL, pack(DefaultLanguageHighlighterColors.KEYWORD)),
+            Map.entry(JjtemplateTokenTypes.STRING, pack(JSON_STRING)),
+            Map.entry(JjtemplateTokenTypes.NUMBER, pack(JSON_NUMBER)),
+            Map.entry(JjtemplateTokenTypes.BOOLEAN, pack(JSON_BOOLEAN)),
+            Map.entry(JjtemplateTokenTypes.NULL, pack(JSON_BOOLEAN)),
             Map.entry(JjtemplateTokenTypes.PIPE, pack(DefaultLanguageHighlighterColors.OPERATION_SIGN)),
             Map.entry(JjtemplateTokenTypes.DOT, pack(DefaultLanguageHighlighterColors.DOT)),
             Map.entry(JjtemplateTokenTypes.COMMA, pack(DefaultLanguageHighlighterColors.COMMA)),

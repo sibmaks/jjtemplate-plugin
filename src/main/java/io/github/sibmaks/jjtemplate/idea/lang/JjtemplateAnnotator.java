@@ -68,6 +68,11 @@ public final class JjtemplateAnnotator implements Annotator {
                                 .range(TextRange.create(stringStart, i + 1))
                                 .textAttributes(JjtemplateSyntaxHighlighter.OBJECT_KEY)
                                 .create();
+                    } else {
+                        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                                .range(TextRange.create(stringStart, i + 1))
+                                .textAttributes(JjtemplateSyntaxHighlighter.JSON_STRING)
+                                .create();
                     }
                 }
                 continue;
@@ -114,6 +119,31 @@ public final class JjtemplateAnnotator implements Annotator {
                             .textAttributes(attributes)
                             .create();
                 }
+                continue;
+            }
+
+            if (ch == '-' || Character.isDigit(ch)) {
+                var end = readNumberEnd(text, i);
+                if (end > i) {
+                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                            .range(TextRange.create(i, end))
+                            .textAttributes(JjtemplateSyntaxHighlighter.JSON_NUMBER)
+                            .create();
+                    i = end - 1;
+                    continue;
+                }
+            }
+
+            if (Character.isLetter(ch)) {
+                var end = readWordEnd(text, i);
+                var word = text.substring(i, end);
+                if ("true".equals(word) || "false".equals(word) || "null".equals(word)) {
+                    holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                            .range(TextRange.create(i, end))
+                            .textAttributes(JjtemplateSyntaxHighlighter.JSON_BOOLEAN)
+                            .create();
+                }
+                i = end - 1;
             }
         }
     }
@@ -132,5 +162,51 @@ public final class JjtemplateAnnotator implements Annotator {
         }
         var next = text.charAt(index + 1);
         return next == '{' || next == '?' || next == '.';
+    }
+
+    private static int readWordEnd(String text, int from) {
+        var index = from;
+        while (index < text.length() && Character.isLetter(text.charAt(index))) {
+            index++;
+        }
+        return index;
+    }
+
+    private static int readNumberEnd(String text, int from) {
+        var index = from;
+        if (text.charAt(index) == '-') {
+            index++;
+        }
+        var intStart = index;
+        while (index < text.length() && Character.isDigit(text.charAt(index))) {
+            index++;
+        }
+        if (intStart == index) {
+            return from;
+        }
+        if (index < text.length() && text.charAt(index) == '.') {
+            var dot = index++;
+            var fractionStart = index;
+            while (index < text.length() && Character.isDigit(text.charAt(index))) {
+                index++;
+            }
+            if (fractionStart == index) {
+                return dot;
+            }
+        }
+        if (index < text.length() && (text.charAt(index) == 'e' || text.charAt(index) == 'E')) {
+            var expStart = index++;
+            if (index < text.length() && (text.charAt(index) == '+' || text.charAt(index) == '-')) {
+                index++;
+            }
+            var digitsStart = index;
+            while (index < text.length() && Character.isDigit(text.charAt(index))) {
+                index++;
+            }
+            if (digitsStart == index) {
+                return expStart;
+            }
+        }
+        return index;
     }
 }

@@ -14,7 +14,7 @@
                   implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateFileType"
                   fieldName="INSTANCE"
                   language="JJTemplate"
-                  extensions="jjt"/>
+                  extensions="jjtemplate;jjt"/>
         <lang.syntaxHighlighterFactory language="JJTemplate"
                                        implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateSyntaxHighlighterFactory"/>
         <lang.parserDefinition language="JJTemplate"
@@ -25,6 +25,7 @@
                                     implementationClass="io.github.sibmaks.jjtemplate.idea.docs.JjtemplateDocumentationProvider"/>
         <annotator language="JJTemplate"
                    implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateAnnotator"/>
-        <postFormatProcessor implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplatePostFormatProcessor"/>
+        <postFormatProcessor implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplatePostFormatProcessor"/>
+        <typedHandler implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateTypedHandler"/>
     </extensions>
 </idea-plugin>
