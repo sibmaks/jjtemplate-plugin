@@ -31,5 +31,6 @@
                              implementationClass="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateFoldingBuilder"/>
         <postFormatProcessor implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplatePostFormatProcessor"/>
         <typedHandler implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateTypedHandler"/>
+        <gotoDeclarationHandler implementation="io.github.sibmaks.jjtemplate.idea.lang.JjtemplateGotoDeclarationHandler"/>
     </extensions>
 </idea-plugin>
