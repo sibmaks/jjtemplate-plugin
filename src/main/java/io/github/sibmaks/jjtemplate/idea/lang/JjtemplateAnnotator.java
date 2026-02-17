@@ -3,9 +3,11 @@ package io.github.sibmaks.jjtemplate.idea.lang;
 import com.intellij.lang.annotation.AnnotationHolder;
 import com.intellij.lang.annotation.Annotator;
 import com.intellij.lang.annotation.HighlightSeverity;
+import com.intellij.openapi.editor.DefaultLanguageHighlighterColors;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import io.github.sibmaks.jjtemplate.lexer.TemplateLexer;
+import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
 import io.github.sibmaks.jjtemplate.lexer.api.TemplateLexerException;
 import org.jetbrains.annotations.NotNull;
 
@@ -64,15 +66,9 @@ public final class JjtemplateAnnotator implements Annotator {
                 if (ch == '"') {
                     inString = false;
                     if (isObjectKey(text, i + 1)) {
-                        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                                .range(TextRange.create(stringStart, i + 1))
-                                .textAttributes(JjtemplateSyntaxHighlighter.OBJECT_KEY)
-                                .create();
+                        highlightStringWithLookups(text, stringStart, i + 1, holder, JjtemplateSyntaxHighlighter.OBJECT_KEY);
                     } else {
-                        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
-                                .range(TextRange.create(stringStart, i + 1))
-                                .textAttributes(JjtemplateSyntaxHighlighter.JSON_STRING)
-                                .create();
+                        highlightStringWithLookups(text, stringStart, i + 1, holder, JjtemplateSyntaxHighlighter.JSON_STRING);
                     }
                 }
                 continue;
@@ -162,6 +158,85 @@ public final class JjtemplateAnnotator implements Annotator {
         }
         var next = text.charAt(index + 1);
         return next == '{' || next == '?' || next == '.';
+    }
+
+    private static void highlightStringWithLookups(String text,
+                                                   int start,
+                                                   int endExclusive,
+                                                   AnnotationHolder holder,
+                                                   com.intellij.openapi.editor.colors.TextAttributesKey plainTextStyle) {
+        var contentStart = start + 1;
+        var contentEnd = Math.max(contentStart, endExclusive - 1);
+        var cursor = start;
+        var index = contentStart;
+
+        while (index < contentEnd) {
+            if (!isTemplateStart(text, index)) {
+                index++;
+                continue;
+            }
+            var lookupEnd = findTemplateEnd(text, index, contentEnd);
+            if (lookupEnd < 0) {
+                break;
+            }
+            annotateRange(holder, cursor, index, plainTextStyle);
+            highlightLookupTokens(text.substring(index, lookupEnd), index, holder);
+            cursor = lookupEnd;
+            index = lookupEnd;
+        }
+        annotateRange(holder, cursor, endExclusive, plainTextStyle);
+    }
+
+    private static int findTemplateEnd(String text, int start, int contentEnd) {
+        for (int i = start + 2; i + 1 < contentEnd; i++) {
+            if (text.charAt(i) == '}' && text.charAt(i + 1) == '}') {
+                return i + 2;
+            }
+        }
+        return -1;
+    }
+
+    private static void highlightLookupTokens(String lookup, int baseOffset, AnnotationHolder holder) {
+        try {
+            var tokens = new TemplateLexer(lookup).tokens();
+            for (var token : tokens) {
+                var key = mapLookupToken(token.type);
+                if (key == null) {
+                    continue;
+                }
+                annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
+            }
+        } catch (Throwable ignored) {
+            annotateRange(holder, baseOffset, baseOffset + lookup.length(), DefaultLanguageHighlighterColors.BRACES);
+        }
+    }
+
+    private static com.intellij.openapi.editor.colors.TextAttributesKey mapLookupToken(TokenType tokenType) {
+        return switch (tokenType) {
+            case OPEN_EXPR, OPEN_COND, OPEN_SPREAD, CLOSE -> DefaultLanguageHighlighterColors.BRACES;
+            case KEYWORD, BOOLEAN, NULL -> DefaultLanguageHighlighterColors.KEYWORD;
+            case STRING -> DefaultLanguageHighlighterColors.STRING;
+            case NUMBER -> DefaultLanguageHighlighterColors.NUMBER;
+            case PIPE, COLON, QUESTION -> DefaultLanguageHighlighterColors.OPERATION_SIGN;
+            case DOT -> DefaultLanguageHighlighterColors.DOT;
+            case COMMA -> DefaultLanguageHighlighterColors.COMMA;
+            case LPAREN, RPAREN -> DefaultLanguageHighlighterColors.PARENTHESES;
+            case IDENT -> DefaultLanguageHighlighterColors.IDENTIFIER;
+            case TEXT -> null;
+        };
+    }
+
+    private static void annotateRange(AnnotationHolder holder,
+                                      int start,
+                                      int endExclusive,
+                                      com.intellij.openapi.editor.colors.TextAttributesKey key) {
+        if (start >= endExclusive) {
+            return;
+        }
+        holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+                .range(TextRange.create(start, endExclusive))
+                .textAttributes(key)
+                .create();
     }
 
     private static int readWordEnd(String text, int from) {
