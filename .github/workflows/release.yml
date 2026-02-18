@@ -24,16 +24,27 @@ jobs:
           distribution: "oracle"
           cache: "gradle"
 
+      - name: Cache Gradle configuration cache
+        uses: actions/cache@v4
+        with:
+          path: .gradle/configuration-cache
+          key: ${{ runner.os }}-configuration-cache-${{ github.workflow }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-configuration-cache-${{ github.workflow }}-
+
       - name: Make gradlew executable
         run: chmod +x gradlew
 
       - name: Build plugin from tag version
         env:
           VERSION: ${{ github.ref_name }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
+          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
         run: |
           VERSION="${VERSION#v}"
           echo "Building version: ${VERSION}"
-          VERSION="${VERSION}" ./gradlew clean buildPlugin --no-daemon
+          VERSION="${VERSION}" ./gradlew buildPlugin signPlugin --build-cache --configuration-cache
 
       - name: Resolve release zip path
         id: zip
@@ -43,10 +54,11 @@ jobs:
           VERSION="${VERSION#v}"
           ZIP_PATH="build/distributions/jjtemplate-plugin-${VERSION}.zip"
 
+          echo "Available artifacts:"
+          ls -la build/distributions || true
+
           if [ ! -f "${ZIP_PATH}" ]; then
             echo "Release zip not found: ${ZIP_PATH}"
-            echo "Available artifacts:"
-            ls -la build/distributions || true
             exit 1
           fi
 
