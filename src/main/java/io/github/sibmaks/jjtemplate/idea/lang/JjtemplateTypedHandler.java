@@ -1,6 +1,7 @@
 package io.github.sibmaks.jjtemplate.idea.lang;
 
 import com.intellij.codeInsight.editorActions.TypedHandlerDelegate;
+import com.intellij.codeInsight.AutoPopupController;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
@@ -71,6 +72,21 @@ public final class JjtemplateTypedHandler extends TypedHandlerDelegate {
         document.insertString(offset, String.valueOf(c) + close);
         editor.getCaretModel().moveToOffset(offset + 1);
         return Result.STOP;
+    }
+
+    @Override
+    public @NotNull Result checkAutoPopup(char charTyped,
+                                          @NotNull Project project,
+                                          @NotNull Editor editor,
+                                          @NotNull PsiFile file) {
+        if (!file.getLanguage().isKindOf(JjtemplateLanguage.INSTANCE)) {
+            return Result.CONTINUE;
+        }
+        if (charTyped == '.' && isInSubstitution(editor)) {
+            AutoPopupController.getInstance(project).scheduleAutoPopup(editor);
+            return Result.STOP;
+        }
+        return Result.CONTINUE;
     }
 
     private static boolean isInSubstitution(@NotNull Editor editor) {
