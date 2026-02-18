@@ -326,10 +326,16 @@ public final class JjtemplateAnnotator implements Annotator {
             return true;
         }
         if (next != null && next.type() == TokenType.COLON) {
+            if (isNamespacedFunctionStart(tokens, identIndex)) {
+                return true;
+            }
             var nextNext = findNextNonTextToken(tokens, next.index() + 1);
             return nextNext != null && nextNext.type() == TokenType.COLON;
         }
         if (previous != null && previous.type() == TokenType.COLON) {
+            if (isNamespacedFunctionName(tokens, identIndex)) {
+                return true;
+            }
             var previousPrevious = findPreviousNonTextToken(tokens, previous.index() - 1);
             if (previousPrevious != null && previousPrevious.type() == TokenType.COLON) {
                 return isPipedIdentifier(tokens, previousPrevious.index() - 1);
@@ -338,7 +344,87 @@ public final class JjtemplateAnnotator implements Annotator {
                 return isPipedIdentifier(tokens, previousPrevious.index());
             }
         }
-        return isNamespacedFunctionPrefix(tokens, identIndex);
+        return isNamespacedFunctionPrefix(tokens, identIndex) || isBareFunctionCall(tokens, identIndex);
+    }
+
+    private static boolean isNamespacedFunctionStart(List<Token> tokens, int identIndex) {
+        var token = tokens.get(identIndex);
+        if (token.type != TokenType.IDENT) {
+            return false;
+        }
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (!isFunctionBoundary(previous)) {
+            return false;
+        }
+        var firstColon = findNextNonTextToken(tokens, identIndex + 1);
+        if (firstColon == null || firstColon.type() != TokenType.COLON) {
+            return false;
+        }
+        var afterFirstColon = findNextNonTextToken(tokens, firstColon.index() + 1);
+        if (afterFirstColon == null) {
+            return false;
+        }
+        if (afterFirstColon.type() == TokenType.IDENT) {
+            return true;
+        }
+        if (afterFirstColon.type() != TokenType.COLON) {
+            return false;
+        }
+        var functionName = findNextNonTextToken(tokens, afterFirstColon.index() + 1);
+        return functionName != null && functionName.type() == TokenType.IDENT;
+    }
+
+    private static boolean isNamespacedFunctionName(List<Token> tokens, int identIndex) {
+        var token = tokens.get(identIndex);
+        if (token.type != TokenType.IDENT) {
+            return false;
+        }
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (previous == null || previous.type() != TokenType.COLON) {
+            return false;
+        }
+        var namespace = findPreviousNonTextToken(tokens, previous.index() - 1);
+        if (namespace == null || namespace.type() != TokenType.IDENT) {
+            return false;
+        }
+        var beforeNamespace = findPreviousNonTextToken(tokens, namespace.index() - 1);
+        return isFunctionBoundary(beforeNamespace);
+    }
+
+    private static boolean isBareFunctionCall(List<Token> tokens, int identIndex) {
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (previous != null && (previous.type() == TokenType.DOT || previous.type() == TokenType.COLON
+                || previous.type() == TokenType.PIPE || previous.type() == TokenType.IDENT)) {
+            return false;
+        }
+        if (!isFunctionBoundary(previous)) {
+            return false;
+        }
+        var next = findNextNonTextToken(tokens, identIndex + 1);
+        if (next == null) {
+            return false;
+        }
+        var looksLikeCall = switch (next.type()) {
+            case IDENT, STRING, NUMBER, BOOLEAN, NULL, LPAREN, DOT -> true;
+            default -> false;
+        };
+        if (!looksLikeCall) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isFunctionBoundary(IndexedToken previous) {
+        if (previous == null) {
+            return true;
+        }
+        return previous.type() == TokenType.OPEN_EXPR
+                || previous.type() == TokenType.OPEN_COND
+                || previous.type() == TokenType.OPEN_SPREAD
+                || previous.type() == TokenType.COMMA
+                || previous.type() == TokenType.LPAREN
+                || previous.type() == TokenType.KEYWORD
+                || previous.type() == TokenType.PIPE;
     }
 
     private static boolean isNamespacedFunctionPrefix(List<Token> tokens, int identIndex) {
@@ -393,7 +479,10 @@ public final class JjtemplateAnnotator implements Annotator {
             return false;
         }
         var beforeDot = findPreviousNonTextToken(tokens, previous.index() - 1);
-        return beforeDot == null || beforeDot.type() != TokenType.IDENT;
+        if (beforeDot == null || beforeDot.type() != TokenType.IDENT) {
+            return true;
+        }
+        return isFunctionCall(tokens, beforeDot.index());
     }
 
     private static Set<String> collectRangeBindings(List<Token> tokens) {

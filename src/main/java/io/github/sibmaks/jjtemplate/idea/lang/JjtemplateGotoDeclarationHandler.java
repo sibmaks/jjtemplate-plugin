@@ -147,7 +147,8 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         var idx = identTokenIndex;
         while (idx - 2 > range.openTokenIndex()
                 && tokens.get(idx - 1).type == TokenType.DOT
-                && tokens.get(idx - 2).type == TokenType.IDENT) {
+                && tokens.get(idx - 2).type == TokenType.IDENT
+                && isPathContinuation(tokens, idx - 2, range.openTokenIndex())) {
             idx -= 2;
         }
         if (idx - 1 > range.openTokenIndex() && tokens.get(idx - 1).type == TokenType.DOT) {
@@ -167,7 +168,8 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         var start = identTokenIndex;
         while (start - 2 > range.openTokenIndex()
                 && tokens.get(start - 1).type == TokenType.DOT
-                && tokens.get(start - 2).type == TokenType.IDENT) {
+                && tokens.get(start - 2).type == TokenType.IDENT
+                && isPathContinuation(tokens, start - 2, range.openTokenIndex())) {
             start -= 2;
         }
         if (start - 1 <= range.openTokenIndex() || tokens.get(start - 1).type != TokenType.DOT) {
@@ -178,6 +180,11 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             result.add(tokens.get(i).lexeme);
         }
         return result;
+    }
+
+    private static boolean isPathContinuation(List<Token> tokens, int identIndex, int openTokenIndex) {
+        var before = identIndex - 1;
+        return before > openTokenIndex && tokens.get(before).type == TokenType.DOT;
     }
 
     private static Token nextNonTextToken(List<Token> tokens, int fromInclusive, int toExclusive) {
