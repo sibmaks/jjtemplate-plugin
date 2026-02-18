@@ -294,6 +294,8 @@ public final class JjtemplateAnnotator implements Annotator {
                     ? JjtemplateSyntaxHighlighter.OBJECT_KEY
                     : isFunctionCall(tokens, i)
                     ? JjtemplateSyntaxHighlighter.TEMPLATE_FUNCTION
+                    : isContextVariable(tokens, i)
+                    ? JjtemplateSyntaxHighlighter.TEMPLATE_CONTEXT_VARIABLE
                     : JjtemplateSyntaxHighlighter.TEMPLATE_VARIABLE;
             annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
         }
@@ -343,9 +345,55 @@ public final class JjtemplateAnnotator implements Annotator {
         }
         if (previous != null && previous.type() == TokenType.COLON) {
             var previousPrevious = findPreviousNonTextToken(tokens, previous.index() - 1);
-            return previousPrevious != null && previousPrevious.type() == TokenType.COLON;
+            if (previousPrevious != null && previousPrevious.type() == TokenType.COLON) {
+                return isPipedIdentifier(tokens, previousPrevious.index() - 1);
+            }
+            if (previousPrevious != null && previousPrevious.type() == TokenType.IDENT) {
+                return isPipedIdentifier(tokens, previousPrevious.index());
+            }
         }
-        return false;
+        return isNamespacedFunctionPrefix(tokens, identIndex);
+    }
+
+    private static boolean isNamespacedFunctionPrefix(List<Token> tokens, int identIndex) {
+        var next = findNextNonTextToken(tokens, identIndex + 1);
+        if (next == null || next.type() != TokenType.COLON) {
+            return false;
+        }
+        var afterFirstColon = findNextNonTextToken(tokens, next.index() + 1);
+        if (afterFirstColon == null) {
+            return false;
+        }
+        if (afterFirstColon.type() == TokenType.IDENT) {
+            return isPipedIdentifier(tokens, identIndex);
+        }
+        if (afterFirstColon.type() != TokenType.COLON) {
+            return false;
+        }
+        var functionName = findNextNonTextToken(tokens, afterFirstColon.index() + 1);
+        return functionName != null
+                && functionName.type() == TokenType.IDENT
+                && isPipedIdentifier(tokens, identIndex);
+    }
+
+    private static boolean isPipedIdentifier(List<Token> tokens, int identIndex) {
+        if (identIndex < 0 || identIndex >= tokens.size()) {
+            return false;
+        }
+        if (tokens.get(identIndex).type != TokenType.IDENT) {
+            return false;
+        }
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        return previous != null && previous.type() == TokenType.PIPE;
+    }
+
+    private static boolean isContextVariable(List<Token> tokens, int identIndex) {
+        var token = tokens.get(identIndex);
+        if (!"context".equals(token.lexeme)) {
+            return false;
+        }
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        return previous != null && previous.type() == TokenType.DOT;
     }
 
     private static IndexedToken findPreviousNonTextToken(List<Token> tokens, int from) {

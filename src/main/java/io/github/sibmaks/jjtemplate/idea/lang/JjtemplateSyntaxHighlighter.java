@@ -27,6 +27,8 @@ public final class JjtemplateSyntaxHighlighter extends SyntaxHighlighterBase {
             TextAttributesKey.createTextAttributesKey("JJTEMPLATE.TEMPLATE_FUNCTION", DefaultLanguageHighlighterColors.FUNCTION_DECLARATION);
     public static final TextAttributesKey TEMPLATE_VARIABLE =
             TextAttributesKey.createTextAttributesKey("JJTEMPLATE.TEMPLATE_VARIABLE", DefaultLanguageHighlighterColors.LOCAL_VARIABLE);
+    public static final TextAttributesKey TEMPLATE_CONTEXT_VARIABLE =
+            TextAttributesKey.createTextAttributesKey("JJTEMPLATE.TEMPLATE_CONTEXT_VARIABLE", DefaultLanguageHighlighterColors.METADATA);
 
     private static final TextAttributesKey[] BAD_CHAR = pack(HighlighterColors.BAD_CHARACTER);
     private static final TextAttributesKey[] EMPTY = TextAttributesKey.EMPTY_ARRAY;
