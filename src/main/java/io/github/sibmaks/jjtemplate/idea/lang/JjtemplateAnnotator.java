@@ -287,32 +287,6 @@ public final class JjtemplateAnnotator implements Annotator {
         };
     }
 
-    private static void highlightTemplateIdentifiers(List<Token> tokens,
-                                                     AnnotationHolder holder,
-                                                     Set<String> localDefinitions) {
-        highlightTemplateIdentifiers(tokens, 0, holder, localDefinitions);
-    }
-
-    private static void highlightTemplateIdentifiers(List<Token> tokens,
-                                                     int baseOffset,
-                                                     AnnotationHolder holder,
-                                                     Set<String> localDefinitions) {
-        for (int i = 0; i < tokens.size(); i++) {
-            var token = tokens.get(i);
-            if (token.type != TokenType.IDENT) {
-                continue;
-            }
-            var key = isDefinitionName(tokens, i) || isRangeBindingName(tokens, i)
-                    ? JjtemplateSyntaxHighlighter.OBJECT_KEY
-                    : isFunctionCall(tokens, i)
-                    ? JjtemplateSyntaxHighlighter.TEMPLATE_FUNCTION
-                    : isContextVariable(tokens, i, localDefinitions)
-                    ? JjtemplateSyntaxHighlighter.TEMPLATE_CONTEXT_VARIABLE
-                    : JjtemplateSyntaxHighlighter.TEMPLATE_VARIABLE;
-            annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
-        }
-    }
-
     private static boolean isDefinitionName(List<Token> tokens, int identIndex) {
         var next = findNextNonTextToken(tokens, identIndex + 1);
         if (next == null || next.type() != TokenType.KEYWORD) {
@@ -401,7 +375,8 @@ public final class JjtemplateAnnotator implements Annotator {
 
     private static boolean isContextVariable(List<Token> tokens,
                                              int identIndex,
-                                             Set<String> localDefinitions) {
+                                             Set<String> localDefinitions,
+                                             Set<String> rangeBindings) {
         var token = tokens.get(identIndex);
         if (!isRootVariable(tokens, identIndex)) {
             return false;
@@ -409,7 +384,6 @@ public final class JjtemplateAnnotator implements Annotator {
         if (localDefinitions.contains(token.lexeme)) {
             return false;
         }
-        var rangeBindings = collectRangeBindingsInScope(tokens, identIndex);
         return !rangeBindings.contains(token.lexeme);
     }
 
@@ -422,64 +396,29 @@ public final class JjtemplateAnnotator implements Annotator {
         return beforeDot == null || beforeDot.type() != TokenType.IDENT;
     }
 
-    private static Set<String> collectRangeBindingsInScope(List<Token> tokens, int tokenIndex) {
-        var scope = findTemplateScope(tokens, tokenIndex);
-        if (scope == null) {
-            return Set.of();
-        }
+    private static Set<String> collectRangeBindings(List<Token> tokens) {
         var bindings = new HashSet<String>();
-        for (int i = scope.startIndex + 1; i < scope.endIndex; i++) {
+        for (int i = 0; i < tokens.size(); i++) {
             var token = tokens.get(i);
             if (token.type != TokenType.KEYWORD || !Keyword.RANGE.eq(token.lexeme)) {
                 continue;
             }
-            var firstBinding = findNextNonTextTokenInRange(tokens, i + 1, scope.endIndex);
+            var firstBinding = findNextNonTextToken(tokens, i + 1);
             if (firstBinding == null || firstBinding.type() != TokenType.IDENT) {
                 continue;
             }
             bindings.add(firstBinding.token().lexeme);
 
-            var maybeComma = findNextNonTextTokenInRange(tokens, firstBinding.index() + 1, scope.endIndex);
+            var maybeComma = findNextNonTextToken(tokens, firstBinding.index() + 1);
             if (maybeComma == null || maybeComma.type() != TokenType.COMMA) {
                 continue;
             }
-            var secondBinding = findNextNonTextTokenInRange(tokens, maybeComma.index() + 1, scope.endIndex);
+            var secondBinding = findNextNonTextToken(tokens, maybeComma.index() + 1);
             if (secondBinding != null && secondBinding.type() == TokenType.IDENT) {
                 bindings.add(secondBinding.token().lexeme);
             }
         }
         return bindings;
-    }
-
-    private static Scope findTemplateScope(List<Token> tokens, int tokenIndex) {
-        var start = -1;
-        for (int i = tokenIndex; i >= 0; i--) {
-            var token = tokens.get(i);
-            if (token.type == TokenType.OPEN_EXPR
-                    || token.type == TokenType.OPEN_COND
-                    || token.type == TokenType.OPEN_SPREAD) {
-                start = i;
-                break;
-            }
-        }
-        if (start < 0) {
-            return null;
-        }
-        for (int i = tokenIndex; i < tokens.size(); i++) {
-            if (tokens.get(i).type == TokenType.CLOSE) {
-                return new Scope(start, i);
-            }
-        }
-        return null;
-    }
-
-    private static IndexedToken findNextNonTextTokenInRange(List<Token> tokens, int from, int endExclusive) {
-        for (int i = from; i < endExclusive; i++) {
-            if (tokens.get(i).type != TokenType.TEXT) {
-                return new IndexedToken(i, tokens.get(i));
-            }
-        }
-        return null;
     }
 
     private static Set<String> extractLocalDefinitions(String source) {
@@ -619,8 +558,9 @@ public final class JjtemplateAnnotator implements Annotator {
         validateJson(text, holder);
         try {
             var tokens = new TemplateLexer(text).tokens();
+            var rangeBindings = collectRangeBindings(tokens);
             validateSubstitutions(tokens, holder);
-            highlightTemplateIdentifiers(tokens, holder, localDefinitions);
+            highlightTemplateIdentifiers(tokens, holder, localDefinitions, rangeBindings);
         } catch (TemplateLexerException e) {
             var position = Math.min(Math.max(e.getPosition(), 0), Math.max(text.length() - 1, 0));
             holder.newAnnotation(HighlightSeverity.ERROR, e.getMessage())
@@ -642,6 +582,31 @@ public final class JjtemplateAnnotator implements Annotator {
         }
     }
 
-    private record Scope(int startIndex, int endIndex) {
+    private static void highlightTemplateIdentifiers(List<Token> tokens,
+                                                     AnnotationHolder holder,
+                                                     Set<String> localDefinitions,
+                                                     Set<String> rangeBindings) {
+        highlightTemplateIdentifiers(tokens, 0, holder, localDefinitions, rangeBindings);
+    }
+
+    private static void highlightTemplateIdentifiers(List<Token> tokens,
+                                                     int baseOffset,
+                                                     AnnotationHolder holder,
+                                                     Set<String> localDefinitions,
+                                                     Set<String> rangeBindings) {
+        for (int i = 0; i < tokens.size(); i++) {
+            var token = tokens.get(i);
+            if (token.type != TokenType.IDENT) {
+                continue;
+            }
+            var key = isDefinitionName(tokens, i) || isRangeBindingName(tokens, i)
+                    ? JjtemplateSyntaxHighlighter.OBJECT_KEY
+                    : isFunctionCall(tokens, i)
+                    ? JjtemplateSyntaxHighlighter.TEMPLATE_FUNCTION
+                    : isContextVariable(tokens, i, localDefinitions, rangeBindings)
+                    ? JjtemplateSyntaxHighlighter.TEMPLATE_CONTEXT_VARIABLE
+                    : JjtemplateSyntaxHighlighter.TEMPLATE_VARIABLE;
+            annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
+        }
     }
 }

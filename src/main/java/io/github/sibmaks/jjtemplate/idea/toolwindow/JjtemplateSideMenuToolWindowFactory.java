@@ -3,6 +3,7 @@ package io.github.sibmaks.jjtemplate.idea.toolwindow;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intellij.json.JsonFileType;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -33,6 +34,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFactory, DumbAware {
+    private static final Logger LOG = Logger.getInstance(JjtemplateSideMenuToolWindowFactory.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TemplateCompiler COMPILER = TemplateCompiler.getInstance();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
@@ -86,7 +88,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
 
             var document = editor.getDocument();
             var sourceFile = FileDocumentManager.getInstance().getFile(document);
-            if (sourceFile == null || !isJjtemplateFile(sourceFile)) {
+            if (sourceFile == null || isNotJjtemplateFile(sourceFile)) {
                 showError(project, "Current file is not a JJTemplate file (*.jjt, *.jjtemplate).");
                 return;
             }
@@ -102,6 +104,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             outputFile.setWritable(false);
             FileEditorManager.getInstance(project).openFile(outputFile, true, true);
         } catch (Exception exception) {
+            LOG.error("JJTemplate compilation failed", exception);
             showError(project, "Compilation failed:\n" + getRootMessage(exception));
         }
     }
@@ -135,7 +138,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
 
         var sourceFile = FileDocumentManager.getInstance().getFile(editor.getDocument());
-        if (sourceFile == null || !isJjtemplateFile(sourceFile)) {
+        if (sourceFile == null || isNotJjtemplateFile(sourceFile)) {
             showError(project, "Current file is not a JJTemplate file (*.jjt, *.jjtemplate).");
             return null;
         }
@@ -149,8 +152,9 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             var localDefinitions = collectLocalDefinitions(script);
             var templateSource = MAPPER.writeValueAsString(script.getTemplate());
             var tokens = new TemplateLexer(templateSource).tokens();
+            var rangeBindings = collectRangeBindings(tokens);
             for (int i = 0; i < tokens.size(); i++) {
-                if (!isExternalRootVariable(tokens, i, localDefinitions)) {
+                if (!isExternalRootVariable(tokens, i, localDefinitions, rangeBindings)) {
                     continue;
                 }
                 addPath(root, readPathSegments(tokens, i));
@@ -179,7 +183,8 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
 
     private static boolean isExternalRootVariable(@NotNull java.util.List<Token> tokens,
                                                   int identIndex,
-                                                  @NotNull Set<String> localDefinitions) {
+                                                  @NotNull Set<String> localDefinitions,
+                                                  @NotNull Set<String> rangeBindings) {
         var token = tokens.get(identIndex);
         if (token.type != TokenType.IDENT || localDefinitions.contains(token.lexeme)) {
             return false;
@@ -192,7 +197,6 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         if (beforeDot != null && beforeDot.type() == TokenType.IDENT) {
             return false;
         }
-        var rangeBindings = collectRangeBindingsInScope(tokens, identIndex);
         return !rangeBindings.contains(token.lexeme);
     }
 
@@ -215,55 +219,29 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         return segments.toArray(String[]::new);
     }
 
-    private static Set<String> collectRangeBindingsInScope(@NotNull java.util.List<Token> tokens, int tokenIndex) {
-        var scope = findTemplateScope(tokens, tokenIndex);
-        if (scope == null) {
-            return Set.of();
-        }
+    private static Set<String> collectRangeBindings(@NotNull java.util.List<Token> tokens) {
         var bindings = new HashSet<String>();
-        for (int i = scope.startIndex + 1; i < scope.endIndex; i++) {
+        for (int i = 0; i < tokens.size(); i++) {
             var token = tokens.get(i);
             if (token.type != TokenType.KEYWORD || !Keyword.RANGE.eq(token.lexeme)) {
                 continue;
             }
-            var firstBinding = findNextNonTextTokenInRange(tokens, i + 1, scope.endIndex);
+            var firstBinding = findNextNonTextToken(tokens, i + 1);
             if (firstBinding == null || firstBinding.type() != TokenType.IDENT) {
                 continue;
             }
             bindings.add(firstBinding.token.lexeme);
 
-            var maybeComma = findNextNonTextTokenInRange(tokens, firstBinding.index + 1, scope.endIndex);
+            var maybeComma = findNextNonTextToken(tokens, firstBinding.index + 1);
             if (maybeComma == null || maybeComma.type() != TokenType.COMMA) {
                 continue;
             }
-            var secondBinding = findNextNonTextTokenInRange(tokens, maybeComma.index + 1, scope.endIndex);
+            var secondBinding = findNextNonTextToken(tokens, maybeComma.index + 1);
             if (secondBinding != null && secondBinding.type() == TokenType.IDENT) {
                 bindings.add(secondBinding.token.lexeme);
             }
         }
         return bindings;
-    }
-
-    private static Scope findTemplateScope(@NotNull java.util.List<Token> tokens, int tokenIndex) {
-        var start = -1;
-        for (int i = tokenIndex; i >= 0; i--) {
-            var token = tokens.get(i);
-            if (token.type == TokenType.OPEN_EXPR
-                    || token.type == TokenType.OPEN_COND
-                    || token.type == TokenType.OPEN_SPREAD) {
-                start = i;
-                break;
-            }
-        }
-        if (start < 0) {
-            return null;
-        }
-        for (int i = tokenIndex; i < tokens.size(); i++) {
-            if (tokens.get(i).type == TokenType.CLOSE) {
-                return new Scope(start, i);
-            }
-        }
-        return null;
     }
 
     private static IndexedToken findPreviousNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
@@ -277,17 +255,6 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
 
     private static IndexedToken findNextNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
         for (int i = from; i < tokens.size(); i++) {
-            if (tokens.get(i).type != TokenType.TEXT) {
-                return new IndexedToken(i, tokens.get(i));
-            }
-        }
-        return null;
-    }
-
-    private static IndexedToken findNextNonTextTokenInRange(@NotNull java.util.List<Token> tokens,
-                                                            int from,
-                                                            int endExclusive) {
-        for (int i = from; i < endExclusive; i++) {
             if (tokens.get(i).type != TokenType.TEXT) {
                 return new IndexedToken(i, tokens.get(i));
             }
@@ -327,9 +294,6 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
     }
 
-    private record Scope(int startIndex, int endIndex) {
-    }
-
     private static String formatContextJson(@NotNull Project project, @NotNull EditorTextField contextInput) {
         try {
             var parsed = MAPPER.readValue(contextInput.getText(), MAP_TYPE);
@@ -342,12 +306,12 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
     }
 
-    private static boolean isJjtemplateFile(@NotNull VirtualFile file) {
+    private static boolean isNotJjtemplateFile(@NotNull VirtualFile file) {
         if (file.getFileType() == JjtemplateFileType.INSTANCE) {
-            return true;
+            return false;
         }
         var extension = file.getExtension();
-        return "jjt".equalsIgnoreCase(extension) || "jjtemplate".equalsIgnoreCase(extension);
+        return !"jjt".equalsIgnoreCase(extension) && !"jjtemplate".equalsIgnoreCase(extension);
     }
 
     private static void showError(@NotNull Project project, @NotNull String message) {
