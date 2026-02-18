@@ -1,6 +1,8 @@
 package io.github.sibmaks.jjtemplate.idea.toolwindow;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intellij.json.JsonFileType;
 import com.intellij.openapi.diagnostic.Logger;
@@ -29,13 +31,15 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFactory, DumbAware {
     private static final Logger LOG = Logger.getInstance(JjtemplateSideMenuToolWindowFactory.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private static final TemplateCompiler COMPILER = TemplateCompiler.getInstance();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
@@ -58,10 +62,13 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             panel.add(contextInput, BorderLayout.CENTER);
 
             var actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            var formatContextButton = new JButton("Format JSON");
+            formatContextButton.addActionListener(event -> formatContextJson(project, contextInput));
             var generateContextButton = new JButton("Generate Context");
             generateContextButton.addActionListener(event -> generateContext(project, contextInput));
             var compileButton = new JButton("Compile");
             compileButton.addActionListener(event -> compileCurrentFile(project, contextInput));
+            actionsPanel.add(formatContextButton);
             actionsPanel.add(generateContextButton);
             actionsPanel.add(compileButton);
             panel.add(actionsPanel, BorderLayout.SOUTH);
@@ -148,9 +155,35 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
     private static Map<String, Object> buildContextTemplate(@NotNull String source) {
         var root = new LinkedHashMap<String, Object>();
         try {
-            var script = MAPPER.readValue(source, TemplateScript.class);
-            var localDefinitions = collectLocalDefinitions(script);
-            var templateSource = MAPPER.writeValueAsString(script.getTemplate());
+            var scriptNode = MAPPER.readTree(source);
+            var globalDefinitions = extractGlobalDefinitions(scriptNode);
+            var script = MAPPER.treeToValue(scriptNode, TemplateScript.class);
+            var localDefinitions = collectLocalDefinitions(script, globalDefinitions);
+            localDefinitions.addAll(collectExpressionDefinitionNames(script));
+
+            collectContextPaths(root, script.getTemplate(), localDefinitions);
+            var definitions = script.getDefinitions();
+            if (definitions != null) {
+                for (var definition : definitions) {
+                    for (var entry : definition.entrySet()) {
+                        var definitionLocals = new HashSet<>(localDefinitions);
+                        definitionLocals.addAll(extractDefinitionLocalVariables(entry.getKey()));
+                        collectContextPaths(root, entry.getKey(), definitionLocals);
+                        collectContextPaths(root, entry.getValue(), definitionLocals);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Keep empty context if parsing fails.
+        }
+        return root;
+    }
+
+    private static void collectContextPaths(@NotNull Map<String, Object> root,
+                                            Object sourceNode,
+                                            @NotNull Set<String> localDefinitions) {
+        try {
+            var templateSource = MAPPER.writeValueAsString(sourceNode);
             var tokens = new TemplateLexer(templateSource).tokens();
             var rangeBindings = collectRangeBindings(tokens);
             for (int i = 0; i < tokens.size(); i++) {
@@ -160,12 +193,12 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
                 addPath(root, readPathSegments(tokens, i));
             }
         } catch (Exception ignored) {
-            // Keep empty context if parsing fails.
+            // Keep partial context if a fragment cannot be parsed.
         }
-        return root;
     }
 
-    private static Set<String> collectLocalDefinitions(@NotNull TemplateScript script) {
+    private static Set<String> collectLocalDefinitions(@NotNull TemplateScript script,
+                                                       @NotNull Set<String> globalDefinitions) {
         var result = new HashSet<String>();
         var definitions = script.getDefinitions();
         if (definitions == null) {
@@ -173,7 +206,9 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
         for (var definition : definitions) {
             for (var key : definition.keySet()) {
-                if (key != null && IDENTIFIER_PATTERN.matcher(key).matches()) {
+                if (key != null
+                        && IDENTIFIER_PATTERN.matcher(key).matches()
+                        && !globalDefinitions.contains(key)) {
                     result.add(key);
                 }
             }
@@ -181,7 +216,116 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         return result;
     }
 
-    private static boolean isExternalRootVariable(@NotNull java.util.List<Token> tokens,
+    private static Set<String> extractDefinitionLocalVariables(String definitionKey) {
+        var result = new HashSet<String>();
+        if (definitionKey == null || definitionKey.isBlank()) {
+            return result;
+        }
+        if (IDENTIFIER_PATTERN.matcher(definitionKey).matches()) {
+            result.add(definitionKey);
+            return result;
+        }
+        try {
+            var tokens = new TemplateLexer(definitionKey).tokens();
+            for (int i = 0; i < tokens.size(); i++) {
+                var token = tokens.get(i);
+                if (token.type != TokenType.IDENT) {
+                    continue;
+                }
+                var next = findNextNonTextToken(tokens, i + 1);
+                if (next == null || next.type() != TokenType.KEYWORD) {
+                    continue;
+                }
+                if (!Keyword.RANGE.eq(next.token.lexeme) && !Keyword.SWITCH.eq(next.token.lexeme)) {
+                    continue;
+                }
+                result.add(token.lexeme);
+                if (Keyword.RANGE.eq(next.token.lexeme)) {
+                    collectRangeBindingsForKeyword(tokens, next.index, result);
+                }
+            }
+        } catch (Exception ignored) {
+            // Ignore malformed definition key and keep best-effort context.
+        }
+        return result;
+    }
+
+    private static Set<String> collectExpressionDefinitionNames(@NotNull TemplateScript script) {
+        var result = new HashSet<String>();
+        var definitions = script.getDefinitions();
+        if (definitions == null) {
+            return result;
+        }
+        for (var definition : definitions) {
+            for (var key : definition.keySet()) {
+                if (key == null || key.isBlank() || IDENTIFIER_PATTERN.matcher(key).matches()) {
+                    continue;
+                }
+                result.addAll(extractDefinitionNames(key));
+            }
+        }
+        return result;
+    }
+
+    private static Set<String> extractDefinitionNames(String definitionKey) {
+        var result = new HashSet<String>();
+        try {
+            var tokens = new TemplateLexer(definitionKey).tokens();
+            for (int i = 0; i < tokens.size(); i++) {
+                var token = tokens.get(i);
+                if (token.type != TokenType.IDENT) {
+                    continue;
+                }
+                var next = findNextNonTextToken(tokens, i + 1);
+                if (next == null || next.type() != TokenType.KEYWORD) {
+                    continue;
+                }
+                if (Keyword.RANGE.eq(next.token.lexeme) || Keyword.SWITCH.eq(next.token.lexeme)) {
+                    result.add(token.lexeme);
+                }
+            }
+        } catch (Exception ignored) {
+            // Ignore malformed definition key and keep best-effort context.
+        }
+        return result;
+    }
+
+    private static Set<String> extractGlobalDefinitions(@NotNull JsonNode scriptNode) {
+        var globals = new HashSet<String>();
+        collectGlobalDefinitionsFromNode(scriptNode.get("globals"), globals);
+        collectGlobalDefinitionsFromNode(scriptNode.get("global"), globals);
+        return globals;
+    }
+
+    private static void collectGlobalDefinitionsFromNode(JsonNode node, @NotNull Set<String> globals) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            var name = node.asText();
+            if (IDENTIFIER_PATTERN.matcher(name).matches()) {
+                globals.add(name);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (var item : node) {
+                collectGlobalDefinitionsFromNode(item, globals);
+            }
+            return;
+        }
+        if (node.isObject()) {
+            var fields = node.fieldNames();
+            while (fields.hasNext()) {
+                var key = fields.next();
+                if (IDENTIFIER_PATTERN.matcher(key).matches()) {
+                    globals.add(key);
+                }
+            }
+        }
+    }
+
+    private static boolean isExternalRootVariable(@NotNull List<Token> tokens,
                                                   int identIndex,
                                                   @NotNull Set<String> localDefinitions,
                                                   @NotNull Set<String> rangeBindings) {
@@ -200,7 +344,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         return !rangeBindings.contains(token.lexeme);
     }
 
-    private static String[] readPathSegments(@NotNull java.util.List<Token> tokens, int rootIndex) {
+    private static String[] readPathSegments(@NotNull List<Token> tokens, int rootIndex) {
         var segments = new java.util.ArrayList<String>();
         segments.add(tokens.get(rootIndex).lexeme);
         var cursor = rootIndex;
@@ -219,32 +363,40 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         return segments.toArray(String[]::new);
     }
 
-    private static Set<String> collectRangeBindings(@NotNull java.util.List<Token> tokens) {
+    private static Set<String> collectRangeBindings(@NotNull List<Token> tokens) {
         var bindings = new HashSet<String>();
         for (int i = 0; i < tokens.size(); i++) {
             var token = tokens.get(i);
             if (token.type != TokenType.KEYWORD || !Keyword.RANGE.eq(token.lexeme)) {
                 continue;
             }
-            var firstBinding = findNextNonTextToken(tokens, i + 1);
-            if (firstBinding == null || firstBinding.type() != TokenType.IDENT) {
-                continue;
-            }
-            bindings.add(firstBinding.token.lexeme);
-
-            var maybeComma = findNextNonTextToken(tokens, firstBinding.index + 1);
-            if (maybeComma == null || maybeComma.type() != TokenType.COMMA) {
-                continue;
-            }
-            var secondBinding = findNextNonTextToken(tokens, maybeComma.index + 1);
-            if (secondBinding != null && secondBinding.type() == TokenType.IDENT) {
-                bindings.add(secondBinding.token.lexeme);
-            }
+            collectRangeBindingsForKeyword(tokens, i, bindings);
         }
         return bindings;
     }
 
-    private static IndexedToken findPreviousNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
+    private static void collectRangeBindingsForKeyword(@NotNull List<Token> tokens,
+                                                       int rangeKeywordIndex,
+                                                       @NotNull Set<String> bindings) {
+        var firstBinding = findNextNonTextToken(tokens, rangeKeywordIndex + 1);
+        if (firstBinding == null || firstBinding.type() != TokenType.IDENT) {
+            bindings.add("item");
+            bindings.add("index");
+            return;
+        }
+        bindings.add(firstBinding.token.lexeme);
+
+        var maybeComma = findNextNonTextToken(tokens, firstBinding.index + 1);
+        if (maybeComma == null || maybeComma.type() != TokenType.COMMA) {
+            return;
+        }
+        var secondBinding = findNextNonTextToken(tokens, maybeComma.index + 1);
+        if (secondBinding != null && secondBinding.type() == TokenType.IDENT) {
+            bindings.add(secondBinding.token.lexeme);
+        }
+    }
+
+    private static IndexedToken findPreviousNonTextToken(@NotNull List<Token> tokens, int from) {
         for (int i = from; i >= 0; i--) {
             if (tokens.get(i).type != TokenType.TEXT) {
                 return new IndexedToken(i, tokens.get(i));
@@ -253,7 +405,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         return null;
     }
 
-    private static IndexedToken findNextNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
+    private static IndexedToken findNextNonTextToken(@NotNull List<Token> tokens, int from) {
         for (int i = from; i < tokens.size(); i++) {
             if (tokens.get(i).type != TokenType.TEXT) {
                 return new IndexedToken(i, tokens.get(i));

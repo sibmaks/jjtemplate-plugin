@@ -440,13 +440,41 @@ public final class JjtemplateAnnotator implements Annotator {
                     var field = fields.next();
                     if (IDENTIFIER_PATTERN.matcher(field).matches()) {
                         result.add(field);
+                        continue;
                     }
+                    result.addAll(extractDefinitionNames(field));
                 }
             }
             return result;
         } catch (Exception ignored) {
             return Set.of();
         }
+    }
+
+    private static Set<String> extractDefinitionNames(String definitionKey) {
+        if (definitionKey == null || definitionKey.isBlank()) {
+            return Set.of();
+        }
+        var names = new HashSet<String>();
+        try {
+            var tokens = new TemplateLexer(definitionKey).tokens();
+            for (int i = 0; i < tokens.size(); i++) {
+                var token = tokens.get(i);
+                if (token.type != TokenType.IDENT) {
+                    continue;
+                }
+                var next = findNextNonTextToken(tokens, i + 1);
+                if (next == null || next.type() != TokenType.KEYWORD) {
+                    continue;
+                }
+                if (Keyword.RANGE.eq(next.token().lexeme) || Keyword.SWITCH.eq(next.token().lexeme)) {
+                    names.add(token.lexeme);
+                }
+            }
+        } catch (Exception ignored) {
+            return Set.of();
+        }
+        return names;
     }
 
     private static IndexedToken findPreviousNonTextToken(List<Token> tokens, int from) {
