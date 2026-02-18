@@ -18,17 +18,26 @@ import com.intellij.ui.content.ContentFactory;
 import io.github.sibmaks.jjtemplate.compiler.api.TemplateCompiler;
 import io.github.sibmaks.jjtemplate.compiler.api.TemplateScript;
 import io.github.sibmaks.jjtemplate.idea.lang.JjtemplateFileType;
+import io.github.sibmaks.jjtemplate.lexer.TemplateLexer;
+import io.github.sibmaks.jjtemplate.lexer.api.Keyword;
+import io.github.sibmaks.jjtemplate.lexer.api.Token;
+import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFactory, DumbAware {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TemplateCompiler COMPILER = TemplateCompiler.getInstance();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
+    private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
@@ -47,11 +56,11 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             panel.add(contextInput, BorderLayout.CENTER);
 
             var actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            var formatButton = new JButton("Format");
-            formatButton.addActionListener(event -> formatContextJson(project, contextInput));
+            var generateContextButton = new JButton("Generate Context");
+            generateContextButton.addActionListener(event -> generateContext(project, contextInput));
             var compileButton = new JButton("Compile");
             compileButton.addActionListener(event -> compileCurrentFile(project, contextInput));
-            actionsPanel.add(formatButton);
+            actionsPanel.add(generateContextButton);
             actionsPanel.add(compileButton);
             panel.add(actionsPanel, BorderLayout.SOUTH);
             return panel;
@@ -95,6 +104,230 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         } catch (Exception exception) {
             showError(project, "Compilation failed:\n" + getRootMessage(exception));
         }
+    }
+
+    private static void generateContext(@NotNull Project project, @NotNull EditorTextField contextInput) {
+        try {
+            var sourceFile = getCurrentJjtemplateFile(project);
+            if (sourceFile == null) {
+                return;
+            }
+
+            var document = FileDocumentManager.getInstance().getDocument(sourceFile);
+            if (document == null) {
+                showError(project, "Unable to read current file.");
+                return;
+            }
+
+            var contextTemplate = buildContextTemplate(document.getText());
+            var pretty = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(contextTemplate);
+            contextInput.setText(pretty);
+        } catch (Exception exception) {
+            showError(project, "Context generation failed:\n" + getRootMessage(exception));
+        }
+    }
+
+    private static VirtualFile getCurrentJjtemplateFile(@NotNull Project project) {
+        var editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
+        if (editor == null) {
+            showError(project, "Open a JJTemplate file in the editor first.");
+            return null;
+        }
+
+        var sourceFile = FileDocumentManager.getInstance().getFile(editor.getDocument());
+        if (sourceFile == null || !isJjtemplateFile(sourceFile)) {
+            showError(project, "Current file is not a JJTemplate file (*.jjt, *.jjtemplate).");
+            return null;
+        }
+        return sourceFile;
+    }
+
+    private static Map<String, Object> buildContextTemplate(@NotNull String source) {
+        var root = new LinkedHashMap<String, Object>();
+        try {
+            var script = MAPPER.readValue(source, TemplateScript.class);
+            var localDefinitions = collectLocalDefinitions(script);
+            var templateSource = MAPPER.writeValueAsString(script.getTemplate());
+            var tokens = new TemplateLexer(templateSource).tokens();
+            for (int i = 0; i < tokens.size(); i++) {
+                if (!isExternalRootVariable(tokens, i, localDefinitions)) {
+                    continue;
+                }
+                addPath(root, readPathSegments(tokens, i));
+            }
+        } catch (Exception ignored) {
+            // Keep empty context if parsing fails.
+        }
+        return root;
+    }
+
+    private static Set<String> collectLocalDefinitions(@NotNull TemplateScript script) {
+        var result = new HashSet<String>();
+        var definitions = script.getDefinitions();
+        if (definitions == null) {
+            return result;
+        }
+        for (var definition : definitions) {
+            for (var key : definition.keySet()) {
+                if (key != null && IDENTIFIER_PATTERN.matcher(key).matches()) {
+                    result.add(key);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static boolean isExternalRootVariable(@NotNull java.util.List<Token> tokens,
+                                                  int identIndex,
+                                                  @NotNull Set<String> localDefinitions) {
+        var token = tokens.get(identIndex);
+        if (token.type != TokenType.IDENT || localDefinitions.contains(token.lexeme)) {
+            return false;
+        }
+        var previous = findPreviousNonTextToken(tokens, identIndex - 1);
+        if (previous == null || previous.type() != TokenType.DOT) {
+            return false;
+        }
+        var beforeDot = findPreviousNonTextToken(tokens, previous.index - 1);
+        if (beforeDot != null && beforeDot.type() == TokenType.IDENT) {
+            return false;
+        }
+        var rangeBindings = collectRangeBindingsInScope(tokens, identIndex);
+        return !rangeBindings.contains(token.lexeme);
+    }
+
+    private static String[] readPathSegments(@NotNull java.util.List<Token> tokens, int rootIndex) {
+        var segments = new java.util.ArrayList<String>();
+        segments.add(tokens.get(rootIndex).lexeme);
+        var cursor = rootIndex;
+        while (true) {
+            var dot = findNextNonTextToken(tokens, cursor + 1);
+            if (dot == null || dot.type() != TokenType.DOT) {
+                break;
+            }
+            var segment = findNextNonTextToken(tokens, dot.index + 1);
+            if (segment == null || segment.type() != TokenType.IDENT) {
+                break;
+            }
+            segments.add(segment.token.lexeme);
+            cursor = segment.index;
+        }
+        return segments.toArray(String[]::new);
+    }
+
+    private static Set<String> collectRangeBindingsInScope(@NotNull java.util.List<Token> tokens, int tokenIndex) {
+        var scope = findTemplateScope(tokens, tokenIndex);
+        if (scope == null) {
+            return Set.of();
+        }
+        var bindings = new HashSet<String>();
+        for (int i = scope.startIndex + 1; i < scope.endIndex; i++) {
+            var token = tokens.get(i);
+            if (token.type != TokenType.KEYWORD || !Keyword.RANGE.eq(token.lexeme)) {
+                continue;
+            }
+            var firstBinding = findNextNonTextTokenInRange(tokens, i + 1, scope.endIndex);
+            if (firstBinding == null || firstBinding.type() != TokenType.IDENT) {
+                continue;
+            }
+            bindings.add(firstBinding.token.lexeme);
+
+            var maybeComma = findNextNonTextTokenInRange(tokens, firstBinding.index + 1, scope.endIndex);
+            if (maybeComma == null || maybeComma.type() != TokenType.COMMA) {
+                continue;
+            }
+            var secondBinding = findNextNonTextTokenInRange(tokens, maybeComma.index + 1, scope.endIndex);
+            if (secondBinding != null && secondBinding.type() == TokenType.IDENT) {
+                bindings.add(secondBinding.token.lexeme);
+            }
+        }
+        return bindings;
+    }
+
+    private static Scope findTemplateScope(@NotNull java.util.List<Token> tokens, int tokenIndex) {
+        var start = -1;
+        for (int i = tokenIndex; i >= 0; i--) {
+            var token = tokens.get(i);
+            if (token.type == TokenType.OPEN_EXPR
+                    || token.type == TokenType.OPEN_COND
+                    || token.type == TokenType.OPEN_SPREAD) {
+                start = i;
+                break;
+            }
+        }
+        if (start < 0) {
+            return null;
+        }
+        for (int i = tokenIndex; i < tokens.size(); i++) {
+            if (tokens.get(i).type == TokenType.CLOSE) {
+                return new Scope(start, i);
+            }
+        }
+        return null;
+    }
+
+    private static IndexedToken findPreviousNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
+        for (int i = from; i >= 0; i--) {
+            if (tokens.get(i).type != TokenType.TEXT) {
+                return new IndexedToken(i, tokens.get(i));
+            }
+        }
+        return null;
+    }
+
+    private static IndexedToken findNextNonTextToken(@NotNull java.util.List<Token> tokens, int from) {
+        for (int i = from; i < tokens.size(); i++) {
+            if (tokens.get(i).type != TokenType.TEXT) {
+                return new IndexedToken(i, tokens.get(i));
+            }
+        }
+        return null;
+    }
+
+    private static IndexedToken findNextNonTextTokenInRange(@NotNull java.util.List<Token> tokens,
+                                                            int from,
+                                                            int endExclusive) {
+        for (int i = from; i < endExclusive; i++) {
+            if (tokens.get(i).type != TokenType.TEXT) {
+                return new IndexedToken(i, tokens.get(i));
+            }
+        }
+        return null;
+    }
+
+    private static void addPath(@NotNull Map<String, Object> root, @NotNull String[] segments) {
+        Map<String, Object> cursor = root;
+        for (var i = 0; i < segments.length; i++) {
+            var segment = segments[i];
+            var leaf = i == segments.length - 1;
+            var existing = cursor.get(segment);
+            if (leaf) {
+                if (!(existing instanceof Map<?, ?>)) {
+                    cursor.put(segment, null);
+                }
+                return;
+            }
+
+            if (existing instanceof Map<?, ?> existingMap) {
+                @SuppressWarnings("unchecked")
+                var cast = (Map<String, Object>) existingMap;
+                cursor = cast;
+                continue;
+            }
+
+            var next = new LinkedHashMap<String, Object>();
+            cursor.put(segment, next);
+            cursor = next;
+        }
+    }
+
+    private record IndexedToken(int index, Token token) {
+        private TokenType type() {
+            return token.type;
+        }
+    }
+
+    private record Scope(int startIndex, int endIndex) {
     }
 
     private static String formatContextJson(@NotNull Project project, @NotNull EditorTextField contextInput) {
