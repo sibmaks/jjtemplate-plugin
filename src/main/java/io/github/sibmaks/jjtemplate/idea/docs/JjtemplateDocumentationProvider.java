@@ -1,14 +1,23 @@
 package io.github.sibmaks.jjtemplate.idea.docs;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intellij.lang.documentation.AbstractDocumentationProvider;
 import com.intellij.psi.PsiElement;
+import io.github.sibmaks.jjtemplate.idea.lang.JjtemplateGotoDeclarationHandler;
 import io.github.sibmaks.jjtemplate.idea.lang.JjtemplateLanguage;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
 public final class JjtemplateDocumentationProvider extends AbstractDocumentationProvider {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     @Override
     public @Nullable @Nls String generateDoc(PsiElement element, @Nullable PsiElement originalElement) {
+        if (element instanceof JjtemplateGotoDeclarationHandler.OffsetNavigationElement navigationElement) {
+            return "<h2>" + escapeHtml(navigationElement.getName()) + "</h2>"
+                    + "<p><b>Kind:</b> JJTemplate local variable</p>"
+                    + formatPreviewValue(navigationElement.getPreviewText());
+        }
         if (element == null || !element.getLanguage().isKindOf(JjtemplateLanguage.INSTANCE)) {
             return null;
         }
@@ -62,5 +71,39 @@ public final class JjtemplateDocumentationProvider extends AbstractDocumentation
 
     private static boolean isFunctionTokenChar(char ch) {
         return Character.isLetterOrDigit(ch) || ch == '_' || ch == ':';
+    }
+
+    private static String formatPreviewValue(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return "<p><b>Value:</b> <code></code></p>";
+        }
+        try {
+            var node = OBJECT_MAPPER.readTree(rawValue);
+            if (node.isTextual()) {
+                return "<p><b>Value:</b> <code>" + escapeHtml(node.textValue()) + "</code></p>";
+            }
+            if (node.isNumber() || node.isBoolean() || node.isNull()) {
+                return "<p><b>Value:</b> <code>" + escapeHtml(node.toString()) + "</code></p>";
+            }
+            if (node.isArray() || node.isObject()) {
+                var pretty = OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+                return "<p><b>Value:</b></p><pre><code>" + escapeHtml(pretty) + "</code></pre>";
+            }
+            return "<p><b>Value:</b> <code>" + escapeHtml(node.toString()) + "</code></p>";
+        } catch (Throwable ignored) {
+            return "<p><b>Value:</b></p><pre><code>" + escapeHtml(rawValue) + "</code></pre>";
+        }
+    }
+
+    private static String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
+import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
@@ -51,6 +52,7 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         if (tokenAtOffset == null) {
             return null;
         }
+        var identifierToken = tokens.get(tokenAtOffset);
 
         var referencePath = resolveReferencePath(tokens, enclosing, tokenAtOffset);
         var reference = resolveReference(tokens, enclosing, tokenAtOffset);
@@ -61,7 +63,17 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         var definition = resolveDefinition(text, tokens, templateRanges, reference, referencePath, offset);
         if (definition == null) {
             ApplicationManager.getApplication().invokeLater(
-                    () -> HintManager.getInstance().showErrorHint(editor, "Context-bound variable: '" + reference + "'")
+                    () -> HintManager.getInstance().showErrorHint(
+                            editor,
+                            "Context-bound variable: '" + reference + "'",
+                            identifierToken.start,
+                            Math.max(identifierToken.end, identifierToken.start + 1),
+                            HintManager.ABOVE,
+                            HintManager.HIDE_BY_ANY_KEY | HintManager.HIDE_BY_TEXT_CHANGE
+                                    | HintManager.HIDE_BY_SCROLLING | HintManager.HIDE_BY_ESCAPE
+                                    | HintManager.HIDE_BY_CARET_MOVE,
+                            0
+                    )
             );
             return PsiElement.EMPTY_ARRAY;
         }
@@ -71,7 +83,15 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             return new PsiElement[]{target};
         }
 
-        return new PsiElement[]{new OffsetNavigationElement(file, definition.start())};
+        return new PsiElement[]{
+                new OffsetNavigationElement(
+                        file,
+                        definition.start(),
+                        definition.end(),
+                        reference,
+                        buildDefinitionPreview(text, definition)
+                )
+        };
     }
 
     @Override
@@ -582,6 +602,38 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         return -1;
     }
 
+    private static String buildDefinitionPreview(String text, Definition definition) {
+        var fallback = abbreviate(text.substring(definition.start(), definition.end()).trim(), 200);
+        var scanLimit = text.length();
+        for (int i = definition.end(); i < text.length(); i++) {
+            var ch = text.charAt(i);
+            if (ch == '\n' || ch == '\r') {
+                scanLimit = i;
+                break;
+            }
+        }
+        var colon = findNextChar(text, definition.end(), ':');
+        if (colon < 0 || colon >= scanLimit) {
+            return fallback;
+        }
+        var valueStart = findNextNonWs(text, colon + 1, text.length());
+        if (valueStart < 0) {
+            return fallback;
+        }
+        var valueEnd = findJsonValueEnd(text, valueStart, text.length());
+        if (valueEnd <= valueStart) {
+            return fallback;
+        }
+        return abbreviate(text.substring(valueStart, valueEnd).trim(), 220);
+    }
+
+    private static String abbreviate(String value, int maxLength) {
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, Math.max(0, maxLength - 3)) + "...";
+    }
+
     private record TemplateRange(int openTokenIndex, int closeTokenIndex, int start, int end) {
     }
 
@@ -591,13 +643,23 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
     private record TextSpan(int start, int end) {
     }
 
-    private static final class OffsetNavigationElement extends FakePsiElement {
+    public static final class OffsetNavigationElement extends FakePsiElement {
         private final PsiFile file;
-        private final int offset;
+        private final int startOffset;
+        private final int endOffsetExclusive;
+        private final String variableName;
+        private final String previewText;
 
-        private OffsetNavigationElement(PsiFile file, int offset) {
+        private OffsetNavigationElement(PsiFile file,
+                                        int startOffset,
+                                        int endOffsetExclusive,
+                                        String variableName,
+                                        String previewText) {
             this.file = file;
-            this.offset = offset;
+            this.startOffset = startOffset;
+            this.endOffsetExclusive = endOffsetExclusive;
+            this.variableName = variableName;
+            this.previewText = previewText;
         }
 
         @Override
@@ -612,7 +674,47 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
 
         @Override
         public TextRange getTextRange() {
-            return TextRange.from(offset, 1);
+            var length = Math.max(1, endOffsetExclusive - startOffset);
+            return TextRange.from(startOffset, length);
+        }
+
+        @Override
+        public int getTextOffset() {
+            return startOffset;
+        }
+
+        @Override
+        public String getName() {
+            return variableName;
+        }
+
+        @Override
+        public String getText() {
+            return previewText;
+        }
+
+        public String getPreviewText() {
+            return previewText;
+        }
+
+        @Override
+        public ItemPresentation getPresentation() {
+            return new ItemPresentation() {
+                @Override
+                public String getPresentableText() {
+                    return variableName;
+                }
+
+                @Override
+                public String getLocationString() {
+                    return previewText;
+                }
+
+                @Override
+                public javax.swing.Icon getIcon(boolean unused) {
+                    return null;
+                }
+            };
         }
 
         @Override
@@ -621,7 +723,7 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             if (virtualFile == null) {
                 return;
             }
-            new OpenFileDescriptor(file.getProject(), virtualFile, offset).navigate(requestFocus);
+            new OpenFileDescriptor(file.getProject(), virtualFile, startOffset).navigate(requestFocus);
         }
 
         @Override
@@ -637,6 +739,11 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
         @Override
         public @NotNull Project getProject() {
             return file.getProject();
+        }
+
+        @Override
+        public String toString() {
+            return "JJTemplate variable '" + variableName + "'";
         }
     }
 }
