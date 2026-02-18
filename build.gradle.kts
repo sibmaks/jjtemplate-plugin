@@ -13,9 +13,8 @@ repositories {
 }
 
 dependencies {
-
     intellijPlatform {
-        intellijIdeaCommunity("2025.1")
+        intellijIdeaCommunity("2024.2")
         bundledPlugin("com.intellij.java")
         pluginModule(implementation("io.github.sibmaks.jjtemplate:jjtemplate:0.5.3"))
     }
@@ -24,7 +23,7 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "251"
+            sinceBuild = "242"
         }
     }
 }
