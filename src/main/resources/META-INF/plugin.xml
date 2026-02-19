@@ -37,5 +37,15 @@
                     anchor="right"
                     icon="/icons/jjtemplate.svg"
                     factoryClass="io.github.sibmaks.jjtemplate.idea.toolwindow.JjtemplateSideMenuToolWindowFactory"/>
+        <statusBarWidgetFactory implementation="io.github.sibmaks.jjtemplate.idea.statusbar.JjtemplateIndentStatusBarWidgetFactory"/>
     </extensions>
+
+    <actions>
+        <action id="JJTemplate.CopyMinifiedJson"
+                class="io.github.sibmaks.jjtemplate.idea.actions.CopyMinifiedJsonAction"
+                text="Copy Minified JSON"
+                description="Copy active JJTemplate file as minified JSON">
+            <add-to-group group-id="Copy.Paste.Special" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

@@ -1,10 +1,14 @@
 package io.github.sibmaks.jjtemplate.idea.toolwindow;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.util.DefaultIndenter;
+import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.intellij.json.JsonFileType;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -29,11 +33,8 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFactory, DumbAware {
@@ -63,7 +64,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
 
             var actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             var formatContextButton = new JButton("Format JSON");
-            formatContextButton.addActionListener(event -> formatContextJson(project, contextInput));
+            formatContextButton.addActionListener(event -> formatActiveFileJson(project));
             var generateContextButton = new JButton("Generate Context");
             generateContextButton.addActionListener(event -> generateContext(project, contextInput));
             var compileButton = new JButton("Compile");
@@ -87,16 +88,13 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
                 return;
             }
 
-            var editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
-            if (editor == null) {
-                showError(project, "Open a JJTemplate file in the editor first.");
+            var sourceFile = getCurrentJjtemplateFile(project);
+            if (sourceFile == null) {
                 return;
             }
-
-            var document = editor.getDocument();
-            var sourceFile = FileDocumentManager.getInstance().getFile(document);
-            if (sourceFile == null || isNotJjtemplateFile(sourceFile)) {
-                showError(project, "Current file is not a JJTemplate file (*.jjt, *.jjtemplate).");
+            var document = FileDocumentManager.getInstance().getDocument(sourceFile);
+            if (document == null) {
+                showError(project, "Unable to read current file.");
                 return;
             }
 
@@ -104,7 +102,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             var compiled = COMPILER.compile(script);
             var context = MAPPER.readValue(contextJson, MAP_TYPE);
             var rendered = compiled.render(context);
-            var output = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(rendered);
+            var output = createPrettyWriter(JjtemplateIndentOptions.getIndent(project)).writeValueAsString(rendered);
 
             var outputName = sourceFile.getNameWithoutExtension() + "-compiled.json";
             var outputFile = new LightVirtualFile(outputName, JsonFileType.INSTANCE, output);
@@ -130,7 +128,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
             }
 
             var contextTemplate = buildContextTemplate(document.getText());
-            var pretty = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(contextTemplate);
+            var pretty = createPrettyWriter(JjtemplateIndentOptions.getIndent(project)).writeValueAsString(contextTemplate);
             contextInput.setText(pretty);
         } catch (Exception exception) {
             showError(project, "Context generation failed:\n" + getRootMessage(exception));
@@ -446,10 +444,29 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
     }
 
+    private static void formatActiveFileJson(@NotNull Project project) {
+        try {
+            var sourceFile = getCurrentJjtemplateFile(project);
+            if (sourceFile == null) {
+                return;
+            }
+            var document = FileDocumentManager.getInstance().getDocument(sourceFile);
+            if (document == null) {
+                showError(project, "Unable to read current file.");
+                return;
+            }
+            var parsed = MAPPER.readTree(document.getText());
+            var pretty = createPrettyWriter(JjtemplateIndentOptions.getIndent(project)).writeValueAsString(parsed);
+            WriteCommandAction.runWriteCommandAction(project, () -> document.setText(pretty));
+        } catch (Exception exception) {
+            showError(project, "Invalid JSON in active file:\n" + getRootMessage(exception));
+        }
+    }
+
     private static String formatContextJson(@NotNull Project project, @NotNull EditorTextField contextInput) {
         try {
             var parsed = MAPPER.readValue(contextInput.getText(), MAP_TYPE);
-            var pretty = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(parsed);
+            var pretty = createPrettyWriter(JjtemplateIndentOptions.getIndent(project)).writeValueAsString(parsed);
             contextInput.setText(pretty);
             return pretty;
         } catch (Exception exception) {
@@ -464,6 +481,15 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
         }
         var extension = file.getExtension();
         return !"jjt".equalsIgnoreCase(extension) && !"jjtemplate".equalsIgnoreCase(extension);
+    }
+
+    private static @NotNull ObjectWriter createPrettyWriter(int jsonIndent) {
+        var indent = " ".repeat(JjtemplateIndentOptions.normalize(jsonIndent));
+        var indenter = new DefaultIndenter(indent, DefaultIndenter.SYS_LF);
+        var printer = new DefaultPrettyPrinter()
+                .withObjectIndenter(indenter)
+                .withArrayIndenter(indenter);
+        return MAPPER.writer(printer);
     }
 
     private static void showError(@NotNull Project project, @NotNull String message) {
