@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.intellij.json.JsonFileType;
-import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -64,7 +63,7 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
 
             var actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
             var formatContextButton = new JButton("Format JSON");
-            formatContextButton.addActionListener(event -> formatActiveFileJson(project));
+            formatContextButton.addActionListener(event -> formatContextJson(project, contextInput));
             var generateContextButton = new JButton("Generate Context");
             generateContextButton.addActionListener(event -> generateContext(project, contextInput));
             var compileButton = new JButton("Compile");
@@ -441,25 +440,6 @@ public final class JjtemplateSideMenuToolWindowFactory implements ToolWindowFact
     private record IndexedToken(int index, Token token) {
         private TokenType type() {
             return token.type;
-        }
-    }
-
-    private static void formatActiveFileJson(@NotNull Project project) {
-        try {
-            var sourceFile = getCurrentJjtemplateFile(project);
-            if (sourceFile == null) {
-                return;
-            }
-            var document = FileDocumentManager.getInstance().getDocument(sourceFile);
-            if (document == null) {
-                showError(project, "Unable to read current file.");
-                return;
-            }
-            var parsed = MAPPER.readTree(document.getText());
-            var pretty = createPrettyWriter(JjtemplateIndentOptions.getIndent(project)).writeValueAsString(parsed);
-            WriteCommandAction.runWriteCommandAction(project, () -> document.setText(pretty));
-        } catch (Exception exception) {
-            showError(project, "Invalid JSON in active file:\n" + getRootMessage(exception));
         }
     }
 
