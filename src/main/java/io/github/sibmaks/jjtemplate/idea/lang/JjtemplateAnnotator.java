@@ -679,6 +679,11 @@ public final class JjtemplateAnnotator implements Annotator {
             validateSubstitutions(tokens, holder);
             highlightTemplateIdentifiers(tokens, holder, localDefinitions, rangeBindings);
         } catch (TemplateLexerException e) {
+            // The editor lexer sees raw JSON text. For expressions like {{ 'a\\'' }} inside JSON strings,
+            // a raw pass may report "Unterminated string literal" even though runtime parsing is valid.
+            if (isEscapedApostropheFalsePositive(text, e)) {
+                return;
+            }
             var position = Math.min(Math.max(e.getPosition(), 0), Math.max(text.length() - 1, 0));
             holder.newAnnotation(HighlightSeverity.ERROR, e.getMessage())
                     .range(TextRange.from(position, 1))
@@ -696,6 +701,21 @@ public final class JjtemplateAnnotator implements Annotator {
     private record IndexedToken(int index, Token token) {
         private TokenType type() {
             return token.type;
+        }
+    }
+
+    private static boolean isEscapedApostropheFalsePositive(String text, TemplateLexerException error) {
+        if (error.getMessage() == null || !error.getMessage().contains("Unterminated string literal")) {
+            return false;
+        }
+        if (!text.contains("\\\\'")) {
+            return false;
+        }
+        try {
+            new TemplateLexer(text.replace("\\\\'", "\\'")).tokens();
+            return true;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
