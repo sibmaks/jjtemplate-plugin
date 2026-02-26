@@ -1,5 +1,7 @@
 package io.github.sibmaks.jjtemplate.idea.lang;
 
+import java.util.ArrayDeque;
+
 public final class JjtemplateJsonLikeFormatter {
     private JjtemplateJsonLikeFormatter() {
     }
@@ -11,6 +13,7 @@ public final class JjtemplateJsonLikeFormatter {
         var indentStep = Math.max(indentSize, 1);
         var out = new StringBuilder(source.length() + 32);
         var indentLevel = 0;
+        var indentAppliedByBracket = new ArrayDeque<Boolean>();
         var index = 0;
         while (index < source.length()) {
             var ch = source.charAt(index);
@@ -34,17 +37,22 @@ public final class JjtemplateJsonLikeFormatter {
                     var close = ch == '{' ? '}' : ']';
                     var next = nextSignificantIndex(source, index + 1);
                     if (next >= source.length() || source.charAt(next) == close) {
+                        indentAppliedByBracket.addLast(false);
                         index++;
                         continue;
                     }
+                    indentAppliedByBracket.addLast(true);
                     indentLevel++;
                     appendNewlineWithIndent(out, indentLevel, indentStep);
                     index++;
                 }
                 case '}', ']' -> {
-                    indentLevel = Math.max(0, indentLevel - 1);
-                    appendNewlineIfNeeded(out);
-                    appendIndent(out, indentLevel, indentStep);
+                    var indented = !indentAppliedByBracket.isEmpty() && indentAppliedByBracket.removeLast();
+                    if (indented) {
+                        indentLevel = Math.max(0, indentLevel - 1);
+                        appendNewlineIfNeeded(out);
+                        appendIndent(out, indentLevel, indentStep);
+                    }
                     out.append(ch);
                     index++;
                 }
