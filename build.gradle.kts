@@ -6,6 +6,7 @@ plugins {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     intellijPlatform {
         defaultRepositories()
@@ -16,7 +17,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.2")
         bundledPlugin("com.intellij.java")
-        pluginModule(implementation("io.github.sibmaks.jjtemplate:jjtemplate:0.6.0"))
+        pluginModule(implementation("io.github.sibmaks.jjtemplate:jjtemplate:unspecified"))
     }
 }
 

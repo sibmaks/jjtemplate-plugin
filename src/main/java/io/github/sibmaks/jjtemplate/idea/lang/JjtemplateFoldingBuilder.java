@@ -23,17 +23,9 @@ public final class JjtemplateFoldingBuilder extends FoldingBuilderEx {
         var result = new ArrayList<FoldingDescriptor>();
         var inString = false;
         var escaped = false;
-        var inTemplate = false;
 
         for (int i = 0; i < text.length(); i++) {
             var ch = text.charAt(i);
-            if (inTemplate) {
-                if (ch == '}' && i + 1 < text.length() && text.charAt(i + 1) == '}') {
-                    inTemplate = false;
-                    i++;
-                }
-                continue;
-            }
             if (inString) {
                 if (escaped) {
                     escaped = false;
@@ -48,8 +40,12 @@ public final class JjtemplateFoldingBuilder extends FoldingBuilderEx {
                 }
                 continue;
             }
-            if (isTemplateStart(text, i)) {
-                inTemplate = true;
+            if (TemplateTextScanner.isTemplateStart(text, i)) {
+                var templateEnd = TemplateTextScanner.findTemplateEnd(text, i, text.length());
+                if (templateEnd < 0) {
+                    break;
+                }
+                i = templateEnd - 1;
                 continue;
             }
             if (ch == '"') {
@@ -90,14 +86,6 @@ public final class JjtemplateFoldingBuilder extends FoldingBuilderEx {
     @Override
     public boolean isCollapsedByDefault(@NotNull ASTNode node) {
         return false;
-    }
-
-    private static boolean isTemplateStart(CharSequence source, int index) {
-        if (source.charAt(index) != '{' || index + 1 >= source.length()) {
-            return false;
-        }
-        var next = source.charAt(index + 1);
-        return next == '{' || next == '?' || next == '.';
     }
 
     private static boolean containsLineBreak(CharSequence text, int fromInclusive, int toExclusive) {

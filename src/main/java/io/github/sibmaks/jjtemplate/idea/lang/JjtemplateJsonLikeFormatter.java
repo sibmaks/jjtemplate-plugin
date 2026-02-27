@@ -26,7 +26,7 @@ public final class JjtemplateJsonLikeFormatter {
                 index = appendString(source, index, out);
                 continue;
             }
-            if (isTemplateStart(source, index)) {
+            if (TemplateTextScanner.isTemplateStart(source, index)) {
                 index = appendTemplateBlock(source, index, out);
                 continue;
             }
@@ -93,17 +93,13 @@ public final class JjtemplateJsonLikeFormatter {
     }
 
     private static int appendTemplateBlock(String source, int from, StringBuilder out) {
-        var index = from;
-        while (index < source.length()) {
-            var ch = source.charAt(index);
-            out.append(ch);
-            if (ch == '}' && index + 1 < source.length() && source.charAt(index + 1) == '}') {
-                out.append('}');
-                return index + 2;
-            }
-            index++;
+        var templateEnd = TemplateTextScanner.findTemplateEnd(source, from, source.length());
+        if (templateEnd < 0) {
+            out.append(source, from, source.length());
+            return source.length();
         }
-        return index;
+        out.append(source, from, templateEnd);
+        return templateEnd;
     }
 
     private static int nextSignificantIndex(String source, int from) {
@@ -134,11 +130,4 @@ public final class JjtemplateJsonLikeFormatter {
         out.append(" ".repeat(spaces));
     }
 
-    private static boolean isTemplateStart(String source, int index) {
-        if (source.charAt(index) != '{' || index + 1 >= source.length()) {
-            return false;
-        }
-        var next = source.charAt(index + 1);
-        return next == '{' || next == '?' || next == '.';
-    }
 }

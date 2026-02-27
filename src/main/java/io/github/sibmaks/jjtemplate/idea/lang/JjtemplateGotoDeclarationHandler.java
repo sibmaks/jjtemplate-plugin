@@ -305,17 +305,9 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             var depth = 1;
             var inString = false;
             var escaped = false;
-            var inTemplate = false;
 
             for (i = i + 1; i < length; i++) {
                 var ch = text.charAt(i);
-                if (inTemplate) {
-                    if (ch == '}' && i + 1 < length && text.charAt(i + 1) == '}') {
-                        inTemplate = false;
-                        i++;
-                    }
-                    continue;
-                }
                 if (inString) {
                     if (escaped) {
                         escaped = false;
@@ -330,9 +322,12 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
                     }
                     continue;
                 }
-                if (ch == '{' && i + 1 < length && text.charAt(i + 1) == '{') {
-                    inTemplate = true;
-                    i++;
+                if (TemplateTextScanner.isTemplateStart(text, i)) {
+                    var templateEnd = TemplateTextScanner.findTemplateEnd(text, i, length);
+                    if (templateEnd < 0) {
+                        return null;
+                    }
+                    i = templateEnd - 1;
                     continue;
                 }
                 if (ch == '"') {

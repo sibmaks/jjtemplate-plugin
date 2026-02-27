@@ -118,12 +118,109 @@ public final class JjtemplateSyntaxLexer extends LexerBase {
                 appendPlainTextTokens(source, token.start, token.end, result);
                 continue;
             }
+            if (token.type == TokenType.STRING) {
+                appendStringToken(source, token.start, token.end, result);
+                continue;
+            }
             result.add(new Lexeme(mapType(token.type), token.start, token.end));
         }
+        result = sanitizeLexemes(result, source);
         if (result.isEmpty()) {
             return fallbackTokens(source);
         }
         return result;
+    }
+
+    private static ArrayList<Lexeme> sanitizeLexemes(List<Lexeme> sourceLexemes, String source) {
+        var sourceLength = source.length();
+        var sanitized = new ArrayList<Lexeme>(sourceLexemes.size());
+        var cursor = 0;
+        for (var lexeme : sourceLexemes) {
+            var start = Math.max(0, Math.min(lexeme.start(), sourceLength));
+            var end = Math.max(0, Math.min(lexeme.end(), sourceLength));
+            if (start < cursor) {
+                start = cursor;
+            }
+            if (start > cursor) {
+                appendPlainTextTokens(source, cursor, start, sanitized);
+                cursor = start;
+            }
+            if (end <= start) {
+                continue;
+            }
+            sanitized.add(new Lexeme(lexeme.type(), start, end));
+            cursor = end;
+            if (cursor >= sourceLength) {
+                break;
+            }
+        }
+        if (cursor < sourceLength) {
+            appendPlainTextTokens(source, cursor, sourceLength, sanitized);
+        }
+        return sanitized;
+    }
+
+    private static void appendStringToken(String source, int from, int to, List<Lexeme> out) {
+        if (to - from < 2) {
+            out.add(new Lexeme(JjtemplateTokenTypes.STRING, from, to));
+            return;
+        }
+        var contentStart = from + 1;
+        var contentEnd = to - 1;
+        var cursor = from;
+        var index = contentStart;
+
+        while (index < contentEnd) {
+            if (!TemplateTextScanner.isTemplateStart(source, index)) {
+                index++;
+                continue;
+            }
+            var templateEnd = TemplateTextScanner.findTemplateEnd(source, index, contentEnd);
+            if (templateEnd < 0) {
+                break;
+            }
+            if (cursor < index) {
+                out.add(new Lexeme(JjtemplateTokenTypes.STRING, cursor, index));
+            }
+            appendTemplateExpressionTokens(source, index, templateEnd, out);
+            cursor = templateEnd;
+            index = templateEnd;
+        }
+
+        if (cursor < to) {
+            out.add(new Lexeme(JjtemplateTokenTypes.STRING, cursor, to));
+        }
+    }
+
+    private static void appendTemplateExpressionTokens(String source, int from, int to, List<Lexeme> out) {
+        var templateSource = source.substring(from, to);
+        try {
+            var tokens = new TemplateLexer(templateSource).tokens();
+            for (var token : tokens) {
+                var tokenStart = from + token.start;
+                var tokenEnd = from + token.end;
+                if (token.type == TokenType.STRING) {
+                    appendStringToken(source, tokenStart, tokenEnd, out);
+                    continue;
+                }
+                var type = token.type == TokenType.TEXT ? JjtemplateTokenTypes.STRING : mapType(token.type);
+                out.add(new Lexeme(type, tokenStart, tokenEnd));
+            }
+        } catch (Throwable ignored) {
+            var openType = switch (source.charAt(from + 1)) {
+                case '{' -> JjtemplateTokenTypes.OPEN_EXPR;
+                case '?' -> JjtemplateTokenTypes.OPEN_COND;
+                case '.' -> JjtemplateTokenTypes.OPEN_SPREAD;
+                default -> JjtemplateTokenTypes.OPEN_EXPR;
+            };
+            out.add(new Lexeme(openType, from, Math.min(from + 2, to)));
+            if (to - from > 4) {
+                out.add(new Lexeme(JjtemplateTokenTypes.STRING, from + 2, to - 2));
+            }
+            if (to - from >= 2) {
+                out.add(new Lexeme(JjtemplateTokenTypes.CLOSE, to - 2, to));
+            }
+        }
     }
 
     private static List<Token> normalizeTokens(List<Token> sourceTokens, String source) {

@@ -31,18 +31,9 @@ public final class JjtemplateAnnotator implements Annotator {
         var inString = false;
         var escaped = false;
         var stringStart = -1;
-        var inTemplate = false;
 
         for (int i = 0; i < text.length(); i++) {
             var ch = text.charAt(i);
-
-            if (inTemplate) {
-                if (ch == '}' && i + 1 < text.length() && text.charAt(i + 1) == '}') {
-                    inTemplate = false;
-                    i++;
-                }
-                continue;
-            }
 
             if (inString) {
                 if (escaped) {
@@ -64,8 +55,12 @@ public final class JjtemplateAnnotator implements Annotator {
                 continue;
             }
 
-            if (isTemplateStart(text, i)) {
-                inTemplate = true;
+            if (TemplateTextScanner.isTemplateStart(text, i)) {
+                var templateEnd = TemplateTextScanner.findTemplateEnd(text, i, text.length());
+                if (templateEnd < 0) {
+                    break;
+                }
+                i = templateEnd - 1;
                 continue;
             }
 
@@ -142,14 +137,6 @@ public final class JjtemplateAnnotator implements Annotator {
         return pointer < text.length() && text.charAt(pointer) == ':';
     }
 
-    private static boolean isTemplateStart(String text, int index) {
-        if (text.charAt(index) != '{' || index + 1 >= text.length()) {
-            return false;
-        }
-        var next = text.charAt(index + 1);
-        return next == '{' || next == '?' || next == '.';
-    }
-
     private static void highlightStringWithLookups(String text,
                                                    int start,
                                                    int endExclusive,
@@ -161,59 +148,113 @@ public final class JjtemplateAnnotator implements Annotator {
         var index = contentStart;
 
         while (index < contentEnd) {
-            if (!isTemplateStart(text, index)) {
+            if (!TemplateTextScanner.isTemplateStart(text, index)) {
                 index++;
                 continue;
             }
-            var lookupEnd = findTemplateEnd(text, index, contentEnd);
+            var lookupEnd = TemplateTextScanner.findTemplateEnd(text, index, contentEnd);
             if (lookupEnd < 0) {
                 break;
             }
             annotateRange(holder, cursor, index, plainTextStyle);
-            highlightLookupTokens(text.substring(index, lookupEnd), index, holder);
+            highlightLookupTokens(text.substring(index, lookupEnd), index, holder, plainTextStyle);
             cursor = lookupEnd;
             index = lookupEnd;
         }
         annotateRange(holder, cursor, endExclusive, plainTextStyle);
     }
 
-    private static int findTemplateEnd(String text, int start, int contentEnd) {
-        for (int i = start + 2; i + 1 < contentEnd; i++) {
-            if (text.charAt(i) == '}' && text.charAt(i + 1) == '}') {
-                return i + 2;
-            }
-        }
-        return -1;
-    }
-
-    private static void highlightLookupTokens(String lookup, int baseOffset, AnnotationHolder holder) {
+    private static void highlightLookupTokens(String lookup,
+                                              int baseOffset,
+                                              AnnotationHolder holder,
+                                              TextAttributesKey fallbackStyle) {
         try {
             var tokens = new TemplateLexer(lookup).tokens();
             for (var token : tokens) {
-                var key = mapLookupToken(token.type);
+                if (token.type == TokenType.STRING) {
+                    annotateRange(holder, baseOffset + token.start, baseOffset + token.end, JjtemplateSyntaxHighlighter.JSON_STRING);
+                    highlightNestedLookupTokensInString(lookup, token.start, token.end, baseOffset, holder);
+                    continue;
+                }
+                var key = mapLookupToken(token.type, fallbackStyle);
                 if (key == null) {
                     continue;
                 }
                 annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
             }
         } catch (Throwable ignored) {
-            annotateRange(holder, baseOffset, baseOffset + lookup.length(), DefaultLanguageHighlighterColors.BRACES);
+            highlightLookupFallback(lookup, baseOffset, holder, fallbackStyle);
         }
     }
 
-    private static TextAttributesKey mapLookupToken(TokenType tokenType) {
+    private static void highlightNestedLookupTokensInString(String lookup,
+                                                            int stringTokenStart,
+                                                            int stringTokenEnd,
+                                                            int baseOffset,
+                                                            AnnotationHolder holder) {
+        if (stringTokenEnd - stringTokenStart < 2) {
+            return;
+        }
+        var tokenSource = lookup.substring(stringTokenStart, stringTokenEnd);
+        var length = tokenSource.length();
+        var contentStart = 0;
+        var contentEnd = length;
+        if (length >= 2) {
+            var quote = tokenSource.charAt(0);
+            if ((quote == '\'' || quote == '"') && tokenSource.charAt(length - 1) == quote) {
+                contentStart = 1;
+                contentEnd = length - 1;
+            }
+        }
+        for (int i = contentStart; i < contentEnd; i++) {
+            if (!TemplateTextScanner.isTemplateStart(tokenSource, i)) {
+                continue;
+            }
+            var nestedEnd = TemplateTextScanner.findTemplateEnd(tokenSource, i, contentEnd);
+            if (nestedEnd < 0) {
+                break;
+            }
+            highlightLookupTokens(
+                    tokenSource.substring(i, nestedEnd),
+                    baseOffset + stringTokenStart + i,
+                    holder,
+                    JjtemplateSyntaxHighlighter.JSON_STRING
+            );
+            i = nestedEnd - 1;
+        }
+    }
+
+    private static TextAttributesKey mapLookupToken(TokenType tokenType, TextAttributesKey fallbackStyle) {
         return switch (tokenType) {
             case OPEN_EXPR, OPEN_COND, OPEN_SPREAD, CLOSE -> DefaultLanguageHighlighterColors.BRACES;
             case KEYWORD, BOOLEAN, NULL -> DefaultLanguageHighlighterColors.KEYWORD;
-            case STRING -> DefaultLanguageHighlighterColors.STRING;
             case NUMBER -> DefaultLanguageHighlighterColors.NUMBER;
             case PIPE, COLON, QUESTION -> DefaultLanguageHighlighterColors.OPERATION_SIGN;
             case DOT -> DefaultLanguageHighlighterColors.DOT;
             case COMMA -> DefaultLanguageHighlighterColors.COMMA;
             case LPAREN, RPAREN -> DefaultLanguageHighlighterColors.PARENTHESES;
+            case STRING -> JjtemplateSyntaxHighlighter.JSON_STRING;
             case IDENT -> null;
             case TEXT -> null;
         };
+    }
+
+    private static void highlightLookupFallback(String lookup,
+                                                int baseOffset,
+                                                AnnotationHolder holder,
+                                                TextAttributesKey fallbackStyle) {
+        var length = lookup.length();
+        if (length >= 2) {
+            annotateRange(holder, baseOffset, baseOffset + 2, DefaultLanguageHighlighterColors.BRACES);
+        }
+        if (length > 4) {
+            annotateRange(holder, baseOffset + 2, baseOffset + length - 2, fallbackStyle);
+        }
+        if (length >= 4) {
+            annotateRange(holder, baseOffset + length - 2, baseOffset + length, DefaultLanguageHighlighterColors.BRACES);
+        } else if (length > 2) {
+            annotateRange(holder, baseOffset + 2, baseOffset + length, fallbackStyle);
+        }
     }
 
     private static void validateJson(String text, AnnotationHolder holder) {
@@ -242,20 +283,20 @@ public final class JjtemplateAnnotator implements Annotator {
             return false;
         }
         var target = Math.min(Math.max(offset, 0), text.length() - 1);
-        var inTemplate = false;
         for (int i = 0; i < text.length(); i++) {
-            if (i == target) {
-                return inTemplate;
-            }
-            if (inTemplate) {
-                if (text.charAt(i) == '}' && i + 1 < text.length() && text.charAt(i + 1) == '}') {
-                    inTemplate = false;
-                    i++;
+            if (TemplateTextScanner.isTemplateStart(text, i)) {
+                var templateEnd = TemplateTextScanner.findTemplateEnd(text, i, text.length());
+                if (templateEnd < 0) {
+                    return target >= i;
                 }
+                if (target >= i && target < templateEnd) {
+                    return true;
+                }
+                i = templateEnd - 1;
                 continue;
             }
-            if (isTemplateStart(text, i)) {
-                inTemplate = true;
+            if (i == target) {
+                return false;
             }
         }
         return false;
