@@ -18,6 +18,7 @@ import io.github.sibmaks.jjtemplate.lexer.api.TokenType;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashSet;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -26,7 +27,7 @@ public final class JjtemplateAnnotator implements Annotator {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
-    private static void highlightJsonLike(String text, AnnotationHolder holder) {
+    private static void highlightJsonLike(String text, AnnotationHolder holder, Set<String> localDefinitions) {
         var nesting = 0;
         var inString = false;
         var escaped = false;
@@ -47,9 +48,23 @@ public final class JjtemplateAnnotator implements Annotator {
                 if (ch == '"') {
                     inString = false;
                     if (isObjectKey(text, i + 1)) {
-                        highlightStringWithLookups(text, stringStart, i + 1, holder, JjtemplateSyntaxHighlighter.OBJECT_KEY);
+                        highlightStringWithLookups(
+                                text,
+                                stringStart,
+                                i + 1,
+                                holder,
+                                JjtemplateSyntaxHighlighter.OBJECT_KEY,
+                                localDefinitions
+                        );
                     } else {
-                        highlightStringWithLookups(text, stringStart, i + 1, holder, JjtemplateSyntaxHighlighter.JSON_STRING);
+                        highlightStringWithLookups(
+                                text,
+                                stringStart,
+                                i + 1,
+                                holder,
+                                JjtemplateSyntaxHighlighter.JSON_STRING,
+                                localDefinitions
+                        );
                     }
                 }
                 continue;
@@ -141,7 +156,8 @@ public final class JjtemplateAnnotator implements Annotator {
                                                    int start,
                                                    int endExclusive,
                                                    AnnotationHolder holder,
-                                                   TextAttributesKey plainTextStyle) {
+                                                   TextAttributesKey plainTextStyle,
+                                                   Set<String> localDefinitions) {
         var contentStart = start + 1;
         var contentEnd = Math.max(contentStart, endExclusive - 1);
         var cursor = start;
@@ -157,7 +173,7 @@ public final class JjtemplateAnnotator implements Annotator {
                 break;
             }
             annotateRange(holder, cursor, index, plainTextStyle);
-            highlightLookupTokens(text.substring(index, lookupEnd), index, holder, plainTextStyle);
+            highlightLookupTokens(text.substring(index, lookupEnd), index, holder, plainTextStyle, localDefinitions);
             cursor = lookupEnd;
             index = lookupEnd;
         }
@@ -167,31 +183,109 @@ public final class JjtemplateAnnotator implements Annotator {
     private static void highlightLookupTokens(String lookup,
                                               int baseOffset,
                                               AnnotationHolder holder,
-                                              TextAttributesKey fallbackStyle) {
+                                              TextAttributesKey fallbackStyle,
+                                              Set<String> localDefinitions) {
         try {
             var tokens = new TemplateLexer(lookup).tokens();
-            for (var token : tokens) {
-                if (token.type == TokenType.STRING) {
-                    annotateRange(holder, baseOffset + token.start, baseOffset + token.end, JjtemplateSyntaxHighlighter.JSON_STRING);
-                    highlightNestedLookupTokensInString(lookup, token.start, token.end, baseOffset, holder);
-                    continue;
-                }
-                var key = mapLookupToken(token.type, fallbackStyle);
-                if (key == null) {
-                    continue;
-                }
-                annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
-            }
+            highlightLookupTokenList(tokens, lookup, baseOffset, holder, fallbackStyle, localDefinitions);
         } catch (Throwable ignored) {
+            var normalizedTokens = tryLexWithEscapedApostropheNormalization(lookup);
+            if (normalizedTokens != null) {
+                highlightLookupTokenList(normalizedTokens, lookup, baseOffset, holder, fallbackStyle, localDefinitions);
+                return;
+            }
             highlightLookupFallback(lookup, baseOffset, holder, fallbackStyle);
         }
+    }
+
+    private static void highlightLookupTokenList(List<Token> tokens,
+                                                 String lookupSource,
+                                                 int baseOffset,
+                                                 AnnotationHolder holder,
+                                                 TextAttributesKey fallbackStyle,
+                                                 Set<String> localDefinitions) {
+        for (var token : tokens) {
+            if (token.type == TokenType.STRING) {
+                annotateRange(holder, baseOffset + token.start, baseOffset + token.end, JjtemplateSyntaxHighlighter.JSON_STRING);
+                highlightNestedLookupTokensInString(
+                        lookupSource,
+                        token.start,
+                        token.end,
+                        baseOffset,
+                        holder,
+                        localDefinitions
+                );
+                continue;
+            }
+            var key = mapLookupToken(token.type, fallbackStyle);
+            if (key == null) {
+                continue;
+            }
+            annotateRange(holder, baseOffset + token.start, baseOffset + token.end, key);
+        }
+        var rangeBindings = collectRangeBindings(tokens);
+        highlightTemplateIdentifiers(tokens, baseOffset, holder, localDefinitions, rangeBindings);
+    }
+
+    private static List<Token> tryLexWithEscapedApostropheNormalization(String lookup) {
+        if (!lookup.contains("\\\\'")) {
+            return null;
+        }
+        try {
+            var normalized = normalizeEscapedApostrophes(lookup);
+            if (lookup.equals(normalized.source())) {
+                return null;
+            }
+            var normalizedTokens = new TemplateLexer(normalized.source()).tokens();
+            return remapTokensToOriginalOffsets(normalizedTokens, normalized.boundaries());
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static List<Token> remapTokensToOriginalOffsets(List<Token> tokens, int[] boundaries) {
+        var remapped = new java.util.ArrayList<Token>(tokens.size());
+        var maxBoundary = boundaries.length - 1;
+        for (var token : tokens) {
+            var start = boundaries[Math.min(Math.max(token.start, 0), maxBoundary)];
+            var end = boundaries[Math.min(Math.max(token.end, 0), maxBoundary)];
+            remapped.add(new Token(token.type, token.lexeme, start, end));
+        }
+        return remapped;
+    }
+
+    private static NormalizedLookup normalizeEscapedApostrophes(String source) {
+        var normalized = new StringBuilder(source.length());
+        var boundaries = new int[source.length() + 1];
+        boundaries[0] = 0;
+        var normalizedLength = 0;
+
+        for (int i = 0; i < source.length(); ) {
+            if (i + 2 < source.length()
+                    && source.charAt(i) == '\\'
+                    && source.charAt(i + 1) == '\\'
+                    && source.charAt(i + 2) == '\'') {
+                normalized.append('\\');
+                boundaries[++normalizedLength] = i + 1;
+                normalized.append('\'');
+                boundaries[++normalizedLength] = i + 3;
+                i += 3;
+                continue;
+            }
+            normalized.append(source.charAt(i));
+            boundaries[++normalizedLength] = i + 1;
+            i++;
+        }
+
+        return new NormalizedLookup(normalized.toString(), Arrays.copyOf(boundaries, normalizedLength + 1));
     }
 
     private static void highlightNestedLookupTokensInString(String lookup,
                                                             int stringTokenStart,
                                                             int stringTokenEnd,
                                                             int baseOffset,
-                                                            AnnotationHolder holder) {
+                                                            AnnotationHolder holder,
+                                                            Set<String> localDefinitions) {
         if (stringTokenEnd - stringTokenStart < 2) {
             return;
         }
@@ -218,7 +312,8 @@ public final class JjtemplateAnnotator implements Annotator {
                     tokenSource.substring(i, nestedEnd),
                     baseOffset + stringTokenStart + i,
                     holder,
-                    JjtemplateSyntaxHighlighter.JSON_STRING
+                    JjtemplateSyntaxHighlighter.JSON_STRING,
+                    localDefinitions
             );
             i = nestedEnd - 1;
         }
@@ -267,7 +362,7 @@ public final class JjtemplateAnnotator implements Annotator {
             }
         } catch (JsonParseException e) {
             var offset = toOffset(text, e);
-            if (isInsideTemplate(text, offset)) {
+            if (isInsideTemplate(text, offset) && !isInvalidJsonEscape(e)) {
                 return;
             }
             holder.newAnnotation(HighlightSeverity.ERROR, e.getOriginalMessage())
@@ -300,6 +395,15 @@ public final class JjtemplateAnnotator implements Annotator {
             }
         }
         return false;
+    }
+
+    private static boolean isInvalidJsonEscape(JsonParseException error) {
+        var message = error.getOriginalMessage();
+        if (message == null) {
+            return false;
+        }
+        return message.contains("character escape")
+                || message.contains("Unexpected character ('\\\\'");
     }
 
     private static void validateSubstitutions(List<Token> tokens, AnnotationHolder holder) {
@@ -712,7 +816,7 @@ public final class JjtemplateAnnotator implements Annotator {
         }
         var text = element.getText();
         var localDefinitions = extractLocalDefinitions(text);
-        highlightJsonLike(text, holder);
+        highlightJsonLike(text, holder, localDefinitions);
         validateJson(text, holder);
         try {
             var tokens = new TemplateLexer(text).tokens();
@@ -745,8 +849,15 @@ public final class JjtemplateAnnotator implements Annotator {
         }
     }
 
+    private record NormalizedLookup(String source, int[] boundaries) {
+    }
+
     private static boolean isEscapedApostropheFalsePositive(String text, TemplateLexerException error) {
-        if (error.getMessage() == null || !error.getMessage().contains("Unterminated string literal")) {
+        var message = error.getMessage();
+        if (message == null || (
+                !message.contains("Unterminated string literal")
+                        && !message.contains("Unexpected character '\\'")
+        )) {
             return false;
         }
         if (!text.contains("\\\\'")) {

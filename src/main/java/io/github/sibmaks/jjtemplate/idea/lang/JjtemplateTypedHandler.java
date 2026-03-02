@@ -62,7 +62,11 @@ public final class JjtemplateTypedHandler extends TypedHandlerDelegate {
             return Result.CONTINUE;
         }
         if (c == '\'' && isEscaped(chars, offset)) {
-            return Result.CONTINUE;
+            // Inside JSON text, apostrophe escape in template strings must stay as \\'
+            // (not \') to keep JSON valid while preserving template semantics.
+            document.insertString(offset, "\\'");
+            editor.getCaretModel().moveToOffset(offset + 2);
+            return Result.STOP;
         }
 
         if (c == '{' && offset > 0 && chars.charAt(offset - 1) == '{') {
