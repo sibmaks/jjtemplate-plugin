@@ -369,7 +369,8 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             return null;
         }
 
-        Definition best = null;
+        Definition bestPrior = null;
+        Definition first = null;
         for (int i = arrayStart + 1; i < arrayEnd; i++) {
             if (text.charAt(i) != '"') {
                 continue;
@@ -382,13 +383,18 @@ public final class JjtemplateGotoDeclarationHandler implements GotoDeclarationHa
             var colonIndex = findNextNonWs(text, stringEnd + 1, arrayEnd);
             if (colonIndex >= 0
                     && text.charAt(colonIndex) == ':'
-                    && key.equals(reference)
-                    && i + 1 <= usageOffset) {
-                best = new Definition(i + 1, stringEnd);
+                    && key.equals(reference)) {
+                var found = new Definition(i + 1, stringEnd);
+                if (first == null) {
+                    first = found;
+                }
+                if (found.start() <= usageOffset) {
+                    bestPrior = found;
+                }
             }
             i = stringEnd;
         }
-        return best;
+        return bestPrior != null ? bestPrior : first;
     }
 
     private static Definition findDefinitionsPathDefinition(String text, List<String> path, int usageOffset) {
